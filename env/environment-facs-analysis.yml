@@ -1,0 +1,79 @@
+# Micromamba Environment for Compositional FACS Analysis
+# Workflow: ALDEx2 + Propeller for DA testing, Network analysis
+# R 4.3.x compatible with Bioconductor 3.18/3.19
+# Created: November 2025 - FIXED VERSION
+
+name: facs-comp-analysis
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # === BASE R + ESSENTIALS ===
+  # R 4.3.x is stable and compatible with most Bioconductor packages
+  - r-base=4.3
+  - r-essentials=4.3
+  
+  # === CORE PACKAGES FOR COMPOSITIONALITY ===
+  # ALDEx2 and dependencies
+  - bioconductor-aldex2
+  - r-zcompositions  # FIXED: was bioconductor-zcompositions
+  - r-compositions>=2.0
+  - r-hmisc  # FIXED: was bioconductor-hmisc
+  
+  # DA testing companion (Propeller via speckle)
+  - bioconductor-speckle
+  - bioconductor-limma
+  
+  # === BATCH CORRECTION ===
+  - bioconductor-sva
+  
+  # === NETWORK ANALYSIS ===
+  - r-igraph>=2.0
+  - r-tidygraph
+  - r-ggraph
+  
+  # === CLUSTERING & SURVIVAL ===
+  - bioconductor-consensusclusterplus
+  - r-survival
+  - r-survminer
+  - r-wgcna  # FIXED: was bioconductor-wgcna
+  
+  # === VISUALIZATION & DATA WRANGLING ===
+  - r-ggplot2
+  - r-dplyr
+  - r-tidyr
+  - r-tibble
+  - r-ggpubr
+  - r-cowplot
+  - r-viridis
+  
+  # === UTILITY PACKAGES ===
+  - r-rmarkdown
+  - r-knitr
+  - r-pheatmap
+  - r-reshape2
+  - r-data.table
+  
+  # === POWER & STATISTICS ===
+  - r-pwr
+  - bioconductor-multtest
+  
+  # === DEVELOPMENT TOOLS ===
+  - git
+  - gcc_linux-64
+  - gfortran_linux-64
+  
+  # === BIOCONDUCTOR CORE (needed for some packages) ===
+  - bioconductor-biobase
+  - bioconductor-biocgenerics
+  - bioconductor-s4vectors
+  - bioconductor-iranges
+  - bioconductor-genomicranges
+
+# Post-installation steps (run in R):
+# > if (!requireNamespace("BiocManager", quietly = TRUE))
+# >     install.packages("BiocManager")
+# > BiocManager::version()  # Should show 3.18 or 3.19
+# > BiocManager::valid()    # Check installation validity
