@@ -3,87 +3,92 @@ name: facs-comp-analysis
 channels:
   - conda-forge
   - bioconda
-  - nodefaults  # Usa 'nodefaults' invece di 'defaults' per evitare conflitti
+  - nodefaults
 
 pin_subdir: linux-64
 
 dependencies:
-  # === CRITICAL: SYSTEM LIBRARIES - LASCIA RISOLVERE AL SOLVER ===
-  # NON specificare versioni patch, permetti al solver di trovare combinazioni coerenti
-  - libstdcxx-ng>=12.2  # Minimo 12.2 per avere CXXABI_1.3.15
+  # === SYSTEM LIBRARIES (CRITICAL FOR LINUX/WSL) ===
+  # Solver is allowed to pick versions, but min versions ensure modern compiler support
+  - libstdcxx-ng>=12.2
   - libgcc-ng>=12.2
   - libgomp>=12.2
   - sysroot_linux-64>=2.17
+  # CAIRO IS CRITICAL FOR RSTUDIO SERVER GRAPHICS ON LINUX
+  - pango
+  - cairo
+  - fontconfig
 
   # === BASE R ===
   - r-base=4.3.*
   
-  # === DIPENDENZE CRITICHE ESPLICITE ===
-  # Questi pacchetti devono essere specificati PRIMA delle loro dipendenti
-  - r-lattice  # Richiesto da latticeExtra
-  - r-rcolorbrewer  # Richiesto da latticeExtra
-  - r-interp  # Dipendenza critica che causa l'errore
-  - r-latticeextra  # Caricato da ALDEx2
-  
+  # === EXPLICIT CRITICAL DEPENDENCIES ===
+  # Specified BEFORE dependents to prevent solver conflicts
+  - r-lattice          # Required by latticeExtra
+  - r-rcolorbrewer     # Required by latticeExtra
+  - r-interp           # Critical dependency often causing build failures
+  - r-latticeextra     # Loaded by ALDEx2
+  - r-cairo            # R interface to cairo graphics (Essential for WSL/Server)
+
+  # === DATA MANIPULATION & VISUALIZATION (TIDYVERSE) ===
+  # Includes: ggplot2, dplyr, tidyr, tibble, readr, purrr, stringr, forcats
+  - r-tidyverse
+  - r-factoextra       # Visualization for multivariate analysis (PCA, Clustering)
+  - r-ggpubr           # Publication ready plots
+  - r-cowplot          # Plot grid composition
+  - r-patchwork        # Advanced plot composition
+  - r-viridis          # Colorblind-friendly palettes
+  - r-corrplot         # Visualization of correlation matrices
+  - r-ggraph           # Network visualization (extends ggplot2)
+
   # === CORE COMPOSITIONALITY PACKAGES ===
-  - bioconductor-aldex2
-  - r-zcompositions
-  - r-compositions>=2.0
-  - r-hmisc
+  - bioconductor-aldex2       # Primary Method (Bayesian)
+  - r-zcompositions           # Imputation and transformation
+  - r-compositions>=2.0       # Core CoDA analysis
+  - r-hmisc                   # Harrell Miscellaneous (correlation functions)
 
   # === PROPELLER (VIA SPECKLE) ===
-  - bioconductor-speckle
-  - bioconductor-limma
+  - bioconductor-speckle      # Propeller method
+  - bioconductor-limma        # Backend for Propeller
 
-  # === BATCH CORRECTION ===
-  - bioconductor-sva
+  # === BATCH CORRECTION & IMPUTATION ===
+  - bioconductor-sva          # ComBat for batch correction (Phase 3 of PDF)
+  - r-mice                    # Multivariate Imputation by Chained Equations (Phase 1 of PDF)
 
   # === NETWORK ANALYSIS ===
   - r-igraph>=2.0
-  - r-tidygraph
-  - r-ggraph
+  - r-tidygraph               # Tidy API for graph manipulation
 
   # === CLUSTERING & SURVIVAL ===
-  - bioconductor-consensusclusterplus
-  - r-survival
-  - r-survminer
-  - r-wgcna
-
-  # === TIDYVERSE & VISUALIZATION ===
-  - r-ggplot2
-  - r-dplyr
-  - r-tidyr
-  - r-tibble
-  - r-ggpubr
-  - r-cowplot
-  - r-viridis
-  - r-patchwork  # Utile per composite plots
+  - bioconductor-consensusclusterplus # Robust clustering (Phase 4)
+  - bioconductor-complexheatmap       # Advanced heatmaps (Standard for bioinfo)
+  - r-survival                        # Survival analysis core
+  - r-survminer                       # Survival plots (Kaplan-Meier)
+  - r-wgcna                           # Weighted correlation network analysis
 
   # === UTILITY PACKAGES ===
   - r-rmarkdown
   - r-knitr
-  - r-pheatmap
   - r-reshape2
   - r-data.table
-  - r-dt  # Interactive tables
+  - r-dt               # Interactive tables in RMarkdown
+  - r-biocmanager      # Manage Bioconductor packages
 
   # === STATISTICS ===
-  - r-pwr
+  - r-pwr              # Power analysis (Critical per PDF recommendations)
   - bioconductor-multtest
 
-  # === DEVELOPMENT TOOLS ===
-  - git
-  - make
-  - cmake
-  
   # === BIOCONDUCTOR CORE ===
   - bioconductor-biobase
   - bioconductor-biocgenerics
   - bioconductor-s4vectors
   - bioconductor-iranges
   - bioconductor-genomicranges
-
-  # === ADDITIONAL USEFUL PACKAGES ===
-  - r-devtools  # Per installazioni da GitHub se necessario
-  - r-remotes   # Alternative a devtools
-  - pandoc      # Per rendering RMarkdown
+  
+  # === DEVELOPMENT TOOLS ===
+  - git
+  - make
+  - cmake
+  - pandoc             # Required for rendering RMarkdown
+  - r-devtools         # Install from GitHub if needed
+  - r-remotes          # Lightweight devtools alternative
