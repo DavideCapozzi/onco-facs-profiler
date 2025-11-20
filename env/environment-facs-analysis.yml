@@ -73,6 +73,8 @@ dependencies:
   - r-data.table
   - r-dt               # Interactive tables in RMarkdown
   - r-biocmanager      # Manage Bioconductor packages
+  - r-openxlsx
+  - r-writexl
 
   # === STATISTICS ===
   - r-pwr              # Power analysis (Critical per PDF recommendations)
