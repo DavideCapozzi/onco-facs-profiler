@@ -12,6 +12,7 @@ library(RColorBrewer)
 library(ggtern)      
 library(patchwork)   
 library(scales)
+library(ggrepel)
 
 # ============================================================================
 # STEP 1: IMPORT FROM EXCEL (Multi-sheet)
@@ -21,68 +22,86 @@ step1_import_excel <- function(file_path,
                                tumor_sheet = "Tumor", 
                                healthy_sheet = "Healthy") {
   
-  cat("\n===== STEP 1: Import from Excel =====\n\n")
+  cat("\n===== STEP 1: Import from Excel (Robust) =====\n\n")
   
-  # 1. Read Tumor Data
-  # ------------------
-  tumor_data <- read_excel(file_path, sheet = tumor_sheet)
-  tumor_data$Condition <- "Tumor"
+  # Helper function to clean dirty numbers (handling commas and < symbols)
+  clean_to_numeric <- function(x) {
+    x <- as.character(x)
+    x <- gsub(",", ".", x)        # Replace Italian commas with dots
+    x <- gsub("[<>]", "", x)      # Remove < or > (e.g. <0.01 becomes 0.01)
+    x <- gsub("ND|n.a.|NaN", NA, x, ignore.case = TRUE) # Handle text NAs
+    suppressWarnings(as.numeric(x))
+  }
   
-  # Force conversion to numeric to catch non-numeric chars early
-  tumor_data <- tumor_data %>%
-    mutate(across(-any_of(c("Patient_ID", "Condition")),
-                  ~ as.numeric(as.character(.)), 
-                  .names = "{.col}"))
+  # 1. Read Data (Force read as text first to prevent auto-format errors)
+  # --------------------------------------------------------------------
+  cat(sprintf("Reading file: %s\n", basename(file_path)))
   
-  # 2. Read Healthy Data
+  # Check if sheets exist
+  sheets <- excel_sheets(file_path)
+  if(!all(c(tumor_sheet, healthy_sheet) %in% sheets)) {
+    stop(paste("Sheets not found. Available sheets:", paste(sheets, collapse=", ")))
+  }
+  
+  raw_tumor <- read_excel(file_path, sheet = tumor_sheet, col_types = "text")
+  raw_healthy <- read_excel(file_path, sheet = healthy_sheet, col_types = "text")
+  
+  raw_tumor$Condition <- "Tumor"
+  raw_healthy$Condition <- "Healthy"
+  
+  combined_raw <- bind_rows(raw_tumor, raw_healthy)
+  
+  # 2. Clean and Process
   # --------------------
-  healthy_data <- read_excel(file_path, sheet = healthy_sheet)
-  healthy_data$Condition <- "Healthy"
+  # Identify metadata vs data columns
+  # We assume 'Patient_ID' and 'Condition' are metadata. 
+  # Everything else is considered a marker.
   
-  healthy_data <- healthy_data %>%
-    mutate(across(-any_of(c("Patient_ID", "Condition")), 
-                  ~ as.numeric(as.character(.)), 
-                  .names = "{.col}"))
+  # Ensure Patient_ID exists
+  if(!"Patient_ID" %in% names(combined_raw)) {
+    stop("Error: 'Patient_ID' column is missing in the Excel file.")
+  }
   
-  # 3. Combine and Format
-  # ---------------------
-  combined_data <- bind_rows(tumor_data, healthy_data)
+  # Process Abundance (The markers)
+  abundance_cols <- setdiff(names(combined_raw), c("Patient_ID", "Condition"))
   
-  # Extract Metadata
-  metadata <- combined_data %>% 
+  abundance <- combined_raw %>%
+    select(all_of(abundance_cols)) %>%
+    mutate(across(everything(), clean_to_numeric)) %>% # Apply cleaner
+    as.data.frame()
+  
+  # Process Metadata
+  metadata <- combined_raw %>%
     select(Patient_ID, Condition) %>%
     mutate(Condition = factor(Condition, levels = c("Healthy", "Tumor"))) %>%
-    as.data.frame() # Convert to base data.frame to safely handle rownames
-  
-  # Extract Abundance
-  # We explicitly remove metadata columns to leave only measurements
-  abundance <- combined_data %>% 
-    select(-Patient_ID, -Condition) %>%
-    as.data.frame() # CRITICAL: Convert tibble to data.frame for rownames support
+    as.data.frame()
   
   # Assign Row Names
-  # This now works without warnings because we converted to data.frame above
   rownames(abundance) <- metadata$Patient_ID
   rownames(metadata) <- metadata$Patient_ID
   
-  # 4. Diagnostics
-  # --------------
-  cat(sprintf("Total samples: %d\n", nrow(abundance)))
-  cat(sprintf("Populations measured: %d\n", ncol(abundance)))
+  # 3. Remove Empty or NA-heavy columns/rows
+  # ----------------------------------------
+  # Remove columns that are completely NA
+  abundance <- abundance[, colSums(is.na(abundance)) < nrow(abundance)]
   
-  # Check for non-numeric columns that might have slipped through
-  non_numeric_cols <- names(abundance)[!sapply(abundance, is.numeric)]
-  if(length(non_numeric_cols) > 0) {
-    warning(paste("Non-numeric columns detected in abundance:", 
-                  paste(non_numeric_cols, collapse=", ")))
-    cat("  Attempting to remove non-numeric columns automatically...\n")
-    abundance <- abundance[, sapply(abundance, is.numeric)]
+  # Impute remaining NAs with 0 (assuming ND = 0 in FACS)
+  na_count <- sum(is.na(abundance))
+  if(na_count > 0) {
+    cat(sprintf("  Warning: %d NA values detected (e.g. from 'ND'). Replacing with 0.\n", na_count))
+    abundance[is.na(abundance)] <- 0
   }
   
-  cat(sprintf("Missing values: %.1f%%\n", 
-              100 * sum(is.na(abundance)) / prod(dim(abundance))))
+  # 4. Diagnostics
+  cat(sprintf("Total samples: %d\n", nrow(abundance)))
+  cat(sprintf("Markers loaded: %d\n", ncol(abundance)))
   
-  cat("\n✓ Data import complete\n")
+  # Check for any non-numeric issues remaining
+  if(!all(sapply(abundance, is.numeric))) {
+    stop("Critical: Some abundance columns could not be converted to numbers. Check Excel format.")
+  }
+  
+  cat("\n✓ Data import and cleaning complete.\n")
   
   return(list(abundance = abundance, metadata = metadata))
 }
@@ -301,130 +320,103 @@ step5_pca_facs <- function(clr_data, metadata, n_top_loadings = 10) {
 # ============================================================================
 
 step6_differential_abundance <- function(abundance, metadata,
-                                         mc_samples = 500,
+                                         mc_samples = 128, # 128 is usually enough for testing, 1000 for publication
                                          fdr_threshold = 0.1) {
   
   cat("\n===== STEP 6: Differential Abundance (ALDEx2) =====\n\n")
   
-  # Ensure Metadata aligns with Abundance
-  # -------------------------------------
+  # 1. Alignment Check
   common_samples <- intersect(rownames(abundance), rownames(metadata))
+  if(length(common_samples) == 0) stop("No matching Patient_IDs between data and metadata!")
+  
   abundance <- abundance[common_samples, ]
   metadata <- metadata[common_samples, ]
   
   conditions <- metadata$Condition
   
-  cat(sprintf("Comparison: %s (n=%d) vs %s (n=%d)\n",
-              levels(conditions)[1], sum(conditions == levels(conditions)[1]),
-              levels(conditions)[2], sum(conditions == levels(conditions)[2])))
+  # 2. PREPARE DATA FOR ALDEx2 (CRITICAL STEP)
+  # ------------------------------------------
+  # ALDEx2 expects: Rows = Features (Markers), Columns = Samples (Patients)
+  # Our data is:    Rows = Samples, Columns = Features
+  # WE MUST TRANSPOSE (t) the matrix.
   
-  # -----------------------------------------------
-  # ROBUST DATA PREPARATION
-  # -----------------------------------------------
+  counts_matrix <- t(data.matrix(abundance)) 
   
-  # 1. Convert to Matrix
-  # We use data.matrix() which handles factors better than as.matrix() 
-  # just in case a factor slipped in.
-  counts_matrix <- data.matrix(abundance)
+  # Check dimensions
+  cat(sprintf("ALDEx2 Input Dimensions: %d Features x %d Samples\n", 
+              nrow(counts_matrix), ncol(counts_matrix)))
   
-  # 2. Handle NAs (CRITICAL FIX)
-  # ALDEx2 fails with NAs. We must check if they exist.
-  if (any(is.na(counts_matrix))) {
-    cat("\nWARNING: NA values detected in data passed to ALDEx2.\n")
-    
-    # Option A: Simple Imputation (replace NA with small value/zero)
-    # This prevents dropping samples, which is better for small cohorts.
-    cat("  Imputing NAs with 0 for ALDEx2 analysis...\n")
-    counts_matrix[is.na(counts_matrix)] <- 0
-    
-    # Alternative logic (commented out): Remove rows with NAs
-    # na_rows <- which(!complete.cases(counts_matrix))
-    # if(length(na_rows) > 0) {
-    #    counts_matrix <- counts_matrix[-na_rows, ]
-    #    conditions <- conditions[-na_rows]
-    # }
+  # ALDEx2 requires INTEGERS. 
+  # FACS data is often %. We multiply by 100 or 1000 to keep precision as integers.
+  # e.g., 10.5% -> 1050.
+  counts_integer <- round(counts_matrix * 1000)
+  
+  # Ensure strictly integer class (removes any lingering attributes)
+  storage.mode(counts_integer) <- "integer"
+  
+  # Final check for NAs
+  if(any(is.na(counts_integer))) {
+    cat("Warning: NAs found in final matrix. Imputing with 0.\n")
+    counts_integer[is.na(counts_integer)] <- 0
   }
   
-  # 3. Prepare for ALDEx2 (Integers)
-  # ALDEx2 requires integer counts. Since FACS data is % or MFI,
-  # we multiply by 100 (or 1000) and round to create pseudo-counts.
-  # The error "round not meaningful for factors" is avoided because 
-  # 'counts_matrix' is guaranteed to be a numeric matrix now.
-  counts_integer <- round(counts_matrix * 100)
-  
-  # Ensure strictly integer mode
-  mode(counts_integer) <- "integer"
-  
-  # 4. Filter Zero Variance Features
-  # Remove columns that are all 0 across all samples
-  keep_cols <- colSums(counts_integer) > 0
-  if(sum(!keep_cols) > 0) {
-    cat(sprintf("  Removing %d features with 0 total abundance.\n", sum(!keep_cols)))
-    counts_integer <- counts_integer[, keep_cols]
+  # Check for features with 0 variance (all zeros)
+  # ALDEx needs at least some data
+  valid_features <- rowSums(counts_integer) > 0
+  if(sum(!valid_features) > 0) {
+    cat(sprintf("  Dropping %d features with 0 counts across all samples.\n", sum(!valid_features)))
+    counts_integer <- counts_integer[valid_features, ]
   }
   
-  # -----------------------------------------------
-  # Run ALDEx2
-  # -----------------------------------------------
+  # 3. Run ALDEx2
+  # -------------
+  cat("Running ALDEx2 (clr transformation + t-test)...\n")
   
-  cat(sprintf("\nRunning ALDEx2 with %d Monte Carlo samples...\n", mc_samples))
-  cat("(This analysis assumes inputs are compositional counts)\n")
+  # We use 'aldex' wrapper but ensure arguments are clean
+  # conditions must be a vector of characters, not a factor with weird levels for safety
+  conds_vec <- as.character(conditions)
   
-  # Run the modular ALDEx2 steps manually for better error control
-  # or use the wrapper 'aldex'. Here we use the wrapper.
-  aldex_result <- tryCatch({
+  aldex_out <- tryCatch({
     ALDEx2::aldex(
-      reads = counts_integer,
-      conditions = conditions,
+      reads = counts_integer,     # Transposed Matrix (Feat x Sample)
+      conditions = conds_vec,     # Vector of conditions
+      mc.samples = mc_samples,
       test = "t",
       effect = TRUE,
-      denom = "iqlr", # inter-quartile log-ratio is robust for asymmetrical data
-      mc.samples = mc_samples,
+      denom = "all",              # 'all' is often safer for FACS than 'iqlr' if features are few (<50)
       verbose = FALSE
     )
   }, error = function(e) {
-    cat("\nERROR inside ALDEx2 execution:\n")
+    cat("!!! ALDEx2 FAILED !!!\n")
     print(e)
     return(NULL)
   })
   
-  if(is.null(aldex_result)) return(NULL)
+  if(is.null(aldex_out)) {
+    stop("ALDEx2 analysis returned NULL. Check the error message above.")
+  }
   
-  # -----------------------------------------------
-  # Format and Return Results
-  # -----------------------------------------------
-  
-  # Convert results to a clean Tibble
-  da_results <- aldex_result %>%
+  # 4. Format Results
+  # -----------------
+  # aldex_out rownames are the Features (Markers)
+  da_results <- aldex_out %>%
     tibble::rownames_to_column("Population") %>%
-    arrange(we.eBH) %>% # Sort by Benjamini-Hochberg corrected p-value
+    arrange(we.eBH) %>%
     mutate(
       Significant = we.eBH < fdr_threshold,
       Direction = case_when(
-        effect > 0 ~ paste0("UP in ", levels(conditions)[2]),
-        effect < 0 ~ paste0("UP in ", levels(conditions)[1]),
+        diff.btw > 0 ~ "UP in Tumor", # diff.btw is usually (Cond2 - Cond1). Check levels!
+        diff.btw < 0 ~ "UP in Healthy",
         TRUE ~ "No change"
       ),
-      EffectSize_Category = case_when(
-        abs(effect) < 0.5 ~ "Small",
-        abs(effect) < 1.0 ~ "Medium",
-        TRUE ~ "Large"
-      )
+      # Correct direction logic based on input levels
+      Direction_Label = ifelse(effect > 0, 
+                               paste("High in", unique(conds_vec)[2]), 
+                               paste("High in", unique(conds_vec)[1]))
     )
   
-  # Summary Output
-  n_sig <- sum(da_results$Significant, na.rm = TRUE)
-  cat(sprintf("\n--- ALDEx2 Results ---\n"))
-  cat(sprintf("Significant features (FDR < %.2f): %d\n", fdr_threshold, n_sig))
-  
-  if (n_sig > 0) {
-    print(head(filter(da_results, Significant), 10))
-  } else {
-    cat("No significant features found. Showing top effect sizes:\n")
-    print(head(da_results %>% arrange(desc(abs(effect))), 5))
-  }
-  
-  cat("\n✓ Differential abundance analysis complete\n")
+  cat(sprintf("\nSignificant features detected: %d\n", sum(da_results$Significant)))
+  print(head(da_results[, c("Population", "we.eBH", "effect", "Direction_Label")], 5))
   
   return(da_results)
 }
