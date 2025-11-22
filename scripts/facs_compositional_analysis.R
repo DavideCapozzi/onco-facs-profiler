@@ -23,34 +23,62 @@ step1_import_excel <- function(file_path,
   
   cat("\n===== STEP 1: Import from Excel =====\n\n")
   
-  # Read tumor data
+  # 1. Read Tumor Data
+  # ------------------
   tumor_data <- read_excel(file_path, sheet = tumor_sheet)
   tumor_data$Condition <- "Tumor"
-  cat(sprintf("Tumor samples: %d\n", nrow(tumor_data)))
   
-  # Read healthy data
+  # Force conversion to numeric to catch non-numeric chars early
+  tumor_data <- tumor_data %>%
+    mutate(across(-any_of(c("Patient_ID", "Condition")),
+                  ~ as.numeric(as.character(.)), 
+                  .names = "{.col}"))
+  
+  # 2. Read Healthy Data
+  # --------------------
   healthy_data <- read_excel(file_path, sheet = healthy_sheet)
   healthy_data$Condition <- "Healthy"
-  cat(sprintf("Healthy samples: %d\n", nrow(healthy_data)))
   
-  # Combine datasets
+  healthy_data <- healthy_data %>%
+    mutate(across(-any_of(c("Patient_ID", "Condition")), 
+                  ~ as.numeric(as.character(.)), 
+                  .names = "{.col}"))
+  
+  # 3. Combine and Format
+  # ---------------------
   combined_data <- bind_rows(tumor_data, healthy_data)
   
-  # Extract Patient_ID and Condition as metadata
+  # Extract Metadata
   metadata <- combined_data %>% 
     select(Patient_ID, Condition) %>%
-    mutate(Condition = factor(Condition, levels = c("Healthy", "Tumor")))
+    mutate(Condition = factor(Condition, levels = c("Healthy", "Tumor"))) %>%
+    as.data.frame() # Convert to base data.frame to safely handle rownames
   
-  # Extract abundance data (numeric columns only)
+  # Extract Abundance
+  # We explicitly remove metadata columns to leave only measurements
   abundance <- combined_data %>% 
     select(-Patient_ID, -Condition) %>%
-    mutate(across(everything(), as.numeric))
+    as.data.frame() # CRITICAL: Convert tibble to data.frame for rownames support
   
+  # Assign Row Names
+  # This now works without warnings because we converted to data.frame above
   rownames(abundance) <- metadata$Patient_ID
   rownames(metadata) <- metadata$Patient_ID
   
-  cat(sprintf("\nTotal samples: %d\n", nrow(abundance)))
+  # 4. Diagnostics
+  # --------------
+  cat(sprintf("Total samples: %d\n", nrow(abundance)))
   cat(sprintf("Populations measured: %d\n", ncol(abundance)))
+  
+  # Check for non-numeric columns that might have slipped through
+  non_numeric_cols <- names(abundance)[!sapply(abundance, is.numeric)]
+  if(length(non_numeric_cols) > 0) {
+    warning(paste("Non-numeric columns detected in abundance:", 
+                  paste(non_numeric_cols, collapse=", ")))
+    cat("  Attempting to remove non-numeric columns automatically...\n")
+    abundance <- abundance[, sapply(abundance, is.numeric)]
+  }
+  
   cat(sprintf("Missing values: %.1f%%\n", 
               100 * sum(is.na(abundance)) / prod(dim(abundance))))
   
@@ -273,10 +301,16 @@ step5_pca_facs <- function(clr_data, metadata, n_top_loadings = 10) {
 # ============================================================================
 
 step6_differential_abundance <- function(abundance, metadata,
-                                        mc_samples = 500,
-                                        fdr_threshold = 0.1) {
+                                         mc_samples = 500,
+                                         fdr_threshold = 0.1) {
   
   cat("\n===== STEP 6: Differential Abundance (ALDEx2) =====\n\n")
+  
+  # Ensure Metadata aligns with Abundance
+  # -------------------------------------
+  common_samples <- intersect(rownames(abundance), rownames(metadata))
+  abundance <- abundance[common_samples, ]
+  metadata <- metadata[common_samples, ]
   
   conditions <- metadata$Condition
   
@@ -284,32 +318,91 @@ step6_differential_abundance <- function(abundance, metadata,
               levels(conditions)[1], sum(conditions == levels(conditions)[1]),
               levels(conditions)[2], sum(conditions == levels(conditions)[2])))
   
-  # Convert to counts for ALDEx2 (scale proportions)
-  counts <- round(abundance * 100)
-  counts <- as.matrix(counts)
-  mode(counts) <- "integer"
+  # -----------------------------------------------
+  # ROBUST DATA PREPARATION
+  # -----------------------------------------------
   
+  # 1. Convert to Matrix
+  # We use data.matrix() which handles factors better than as.matrix() 
+  # just in case a factor slipped in.
+  counts_matrix <- data.matrix(abundance)
+  
+  # 2. Handle NAs (CRITICAL FIX)
+  # ALDEx2 fails with NAs. We must check if they exist.
+  if (any(is.na(counts_matrix))) {
+    cat("\nWARNING: NA values detected in data passed to ALDEx2.\n")
+    
+    # Option A: Simple Imputation (replace NA with small value/zero)
+    # This prevents dropping samples, which is better for small cohorts.
+    cat("  Imputing NAs with 0 for ALDEx2 analysis...\n")
+    counts_matrix[is.na(counts_matrix)] <- 0
+    
+    # Alternative logic (commented out): Remove rows with NAs
+    # na_rows <- which(!complete.cases(counts_matrix))
+    # if(length(na_rows) > 0) {
+    #    counts_matrix <- counts_matrix[-na_rows, ]
+    #    conditions <- conditions[-na_rows]
+    # }
+  }
+  
+  # 3. Prepare for ALDEx2 (Integers)
+  # ALDEx2 requires integer counts. Since FACS data is % or MFI,
+  # we multiply by 100 (or 1000) and round to create pseudo-counts.
+  # The error "round not meaningful for factors" is avoided because 
+  # 'counts_matrix' is guaranteed to be a numeric matrix now.
+  counts_integer <- round(counts_matrix * 100)
+  
+  # Ensure strictly integer mode
+  mode(counts_integer) <- "integer"
+  
+  # 4. Filter Zero Variance Features
+  # Remove columns that are all 0 across all samples
+  keep_cols <- colSums(counts_integer) > 0
+  if(sum(!keep_cols) > 0) {
+    cat(sprintf("  Removing %d features with 0 total abundance.\n", sum(!keep_cols)))
+    counts_integer <- counts_integer[, keep_cols]
+  }
+  
+  # -----------------------------------------------
   # Run ALDEx2
+  # -----------------------------------------------
+  
   cat(sprintf("\nRunning ALDEx2 with %d Monte Carlo samples...\n", mc_samples))
-  cat("(This may take 1-2 minutes)\n")
+  cat("(This analysis assumes inputs are compositional counts)\n")
   
-  aldex_result <- aldex(counts,
-                        conditions = conditions,
-                        test = "t",
-                        effect = TRUE,
-                        denom = "iqlr",
-                        mc.samples = mc_samples,
-                        verbose = FALSE)
+  # Run the modular ALDEx2 steps manually for better error control
+  # or use the wrapper 'aldex'. Here we use the wrapper.
+  aldex_result <- tryCatch({
+    ALDEx2::aldex(
+      reads = counts_integer,
+      conditions = conditions,
+      test = "t",
+      effect = TRUE,
+      denom = "iqlr", # inter-quartile log-ratio is robust for asymmetrical data
+      mc.samples = mc_samples,
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    cat("\nERROR inside ALDEx2 execution:\n")
+    print(e)
+    return(NULL)
+  })
   
-  # Format results
+  if(is.null(aldex_result)) return(NULL)
+  
+  # -----------------------------------------------
+  # Format and Return Results
+  # -----------------------------------------------
+  
+  # Convert results to a clean Tibble
   da_results <- aldex_result %>%
-    rownames_to_column("Population") %>%
-    arrange(we.eBH) %>%
+    tibble::rownames_to_column("Population") %>%
+    arrange(we.eBH) %>% # Sort by Benjamini-Hochberg corrected p-value
     mutate(
       Significant = we.eBH < fdr_threshold,
       Direction = case_when(
-        effect > 0 ~ paste0("↑ ", levels(conditions)[2]),
-        effect < 0 ~ paste0("↑ ", levels(conditions)[1]),
+        effect > 0 ~ paste0("UP in ", levels(conditions)[2]),
+        effect < 0 ~ paste0("UP in ", levels(conditions)[1]),
         TRUE ~ "No change"
       ),
       EffectSize_Category = case_when(
@@ -319,29 +412,16 @@ step6_differential_abundance <- function(abundance, metadata,
       )
     )
   
-  # Summary
+  # Summary Output
   n_sig <- sum(da_results$Significant, na.rm = TRUE)
-  cat(sprintf("\n--- Results Summary ---\n"))
-  cat(sprintf("Significant populations (FDR < %.2f): %d / %d (%.1f%%)\n",
-              fdr_threshold, n_sig, nrow(da_results),
-              100 * n_sig / nrow(da_results)))
+  cat(sprintf("\n--- ALDEx2 Results ---\n"))
+  cat(sprintf("Significant features (FDR < %.2f): %d\n", fdr_threshold, n_sig))
   
   if (n_sig > 0) {
-    cat("\nTop significant populations:\n")
-    sig_table <- da_results %>%
-      filter(Significant) %>%
-      select(Population, EffectSize = effect, FDR = we.eBH, Direction) %>%
-      arrange(FDR)
-    
-    print(head(sig_table, 10), row.names = FALSE)
+    print(head(filter(da_results, Significant), 10))
   } else {
-    cat("\nNo significant differences detected at FDR < 0.1\n")
-    cat("Top populations by effect size:\n")
-    top_table <- da_results %>%
-      arrange(desc(abs(effect))) %>%
-      select(Population, EffectSize = effect, FDR = we.eBH) %>%
-      head(10)
-    print(top_table, row.names = FALSE)
+    cat("No significant features found. Showing top effect sizes:\n")
+    print(head(da_results %>% arrange(desc(abs(effect))), 5))
   }
   
   cat("\n✓ Differential abundance analysis complete\n")
@@ -640,7 +720,7 @@ run_complete_workflow <- function(file_path,
                                  generate_plots = TRUE) {
   
   cat("\n╔══════════════════════════════════════════════════════╗\n")
-  cat("║  FACS Compositional Analysis - Complete Workflow    ║\n")
+  cat("║  FACS Compositional Analysis - Complete Workflow     ║\n")
   cat("╚══════════════════════════════════════════════════════╝\n")
   
   # Step 1: Import
