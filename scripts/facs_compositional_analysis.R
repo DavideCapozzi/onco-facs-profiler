@@ -9,8 +9,8 @@ library(readxl)
 library(ALDEx2)
 library(pheatmap)
 library(RColorBrewer)
-library(ggtern)      # For ternary plots
-library(patchwork)   # For plot arrangement
+library(ggtern)      
+library(patchwork)   
 library(scales)
 
 # ============================================================================
@@ -702,30 +702,30 @@ run_complete_workflow <- function(file_path,
 # USAGE EXAMPLE
 # ============================================================================
 
-# # Run complete analysis
-# results <- run_complete_workflow(
-#   file_path = "your_data.xlsx",
-#   tumor_sheet = "Tumor",     # or "NSCLC" or whatever your sheet is named
-#   healthy_sheet = "Healthy",  # or "Control" etc.
-#   generate_plots = TRUE
-# )
-# 
-# # Access results
-# abundance_clean <- results$abundance_clean
-# da_results <- results$da_results
-# 
-# # Display plots
-# print(results$plots$pca_clean)
-# print(results$plots$volcano)
-# print(results$plots$boxplots)
-# print(results$plots$composition)
-# print(results$plots$ma_plot)
-# print(results$plots$ratios)
-# 
-# # Save plots
-# ggsave("pca_clean.pdf", results$plots$pca_clean, width = 12, height = 8)
-# ggsave("volcano.pdf", results$plots$volcano, width = 10, height = 8)
-# ggsave("boxplots.pdf", results$plots$boxplots, width = 12, height = 10)
-# 
-# # Export results
-# write_csv(results$da_results, "differential_abundance_results.csv")
+# Run complete analysis
+results <- run_complete_workflow(
+  file_path = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_pulito_anonimo.xlsx",
+  tumor_sheet = "NSCLC OS > 18",     # or "NSCLC" or whatever your sheet is named
+  healthy_sheet = "HD",  # or "Control" etc.
+  generate_plots = TRUE
+)
+
+# Access results
+abundance_clean <- results$abundance_clean
+da_results <- results$da_results
+
+# Display plots
+print(results$plots$pca_clean)
+print(results$plots$volcano)
+print(results$plots$boxplots)
+print(results$plots$composition)
+print(results$plots$ma_plot)
+print(results$plots$ratios)
+
+# Save plots
+ggsave("pca_clean.pdf", results$plots$pca_clean, width = 12, height = 8)
+ggsave("volcano.pdf", results$plots$volcano, width = 10, height = 8)
+ggsave("boxplots.pdf", results$plots$boxplots, width = 12, height = 10)
+
+# Export results
+write_csv(results$da_results, "differential_abundance_results.csv")
