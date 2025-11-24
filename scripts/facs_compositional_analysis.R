@@ -776,9 +776,9 @@ run_complete_workflow <- function(file_path,
 
 # Run complete analysis
 results <- run_complete_workflow(
-  file_path = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_pulito_anonimo.xlsx",
-  tumor_sheet = "NSCLC OS > 18",     # or "NSCLC" or whatever your sheet is named
-  healthy_sheet = "HD",  # or "Control" etc.
+  file_path = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_pulito_standardizzato.xlsx",
+  tumor_sheet = "NSCLC",     # or "NSCLC" or whatever your sheet is named
+  healthy_sheet = "Healthy_Donors",  # or "Control" etc.
   generate_plots = TRUE
 )
 

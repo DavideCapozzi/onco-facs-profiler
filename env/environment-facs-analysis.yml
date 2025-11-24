@@ -40,7 +40,8 @@ dependencies:
   - r-viridis          # Colorblind-friendly palettes
   - r-corrplot         # Visualization of correlation matrices
   - r-ggraph           # Network visualization (extends ggplot2)
-  - r-ggtern           # Ternary plots 
+  - r-ggtern           # Ternary plots
+  - r-janitor 
 
   # === CORE COMPOSITIONALITY PACKAGES ===
   - bioconductor-aldex2       # Primary Method (Bayesian)
