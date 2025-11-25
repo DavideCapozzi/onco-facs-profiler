@@ -51,12 +51,16 @@ CONFIG <- list(
     
     "Panel_3_Tregs" = c("T-REG", "RESTING", "ACTIVE", "SUPPRESSIVE", "TREGCD137"),
     
-    "Panel_4_Memory_Exhaustion" = c("CM", "EFF", "EM", "NAIVE", 
-                                    "CD137TOT", "CD28", "CD137CD4", "CD137CD8", 
-                                    "CD137CM", "CD137EMRA", "CD137NAIVE", "CD137EFF", 
-                                    "CD137KI67", "CD137PD1", "KI67", "KI67CD4", 
-                                    "KI67CD8", "PD1", "PD1CD4", "PD1CD8", 
-                                    "PD1CM", "PD1EMRA", "PD1NAIVE", "PD1EFF")
+    "Panel_4_Differentiation_Spectrum" = c("CM", "EFF", "EM", "NAIVE"),
+    
+    "Panel_5_CD137" = c("CD137TOT", "CD28", "CD137CD4", "CD137CD8", 
+                  "CD137CM", "CD137EMRA", "CD137NAIVE", "CD137EFF", 
+                  "CD137KI67", "CD137PD1"),
+    
+    "Panel_6" = c("KI67", "KI67CD4", "KI67CD8"),
+    
+    "Panel_7" = c("PD1", "PD1CD4", "PD1CD8", 
+                  "PD1CM", "PD1EMRA", "PD1NAIVE", "PD1EFF")
   )
 )
 
