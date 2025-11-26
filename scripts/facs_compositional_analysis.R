@@ -19,7 +19,7 @@ suppressPackageStartupMessages({
 
 # 2. CONFIGURATION & PARAMETERS ------------------------------------------------
 CONFIG <- list(
-  file_path = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_pulito_standardizzato.xlsx",
+  file_path = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzato.xlsx",
   
   sheets_to_read = list(
     "HNSCC" = "HNSCC", 
@@ -44,7 +44,7 @@ CONFIG <- list(
   # Define lists of markers to be plotted together. 
   # Ensure spelling matches Excel columns exactly.
   marker_groups = list(
-    "Panel_1_General_T" = c("CD3", "CD4", "CD8TOT"),
+    "Panel_1_General_T" = c("CD3", "CD4", "CD8"),
     
     "Panel_2_Myeloid" = c("CD45", "NEUTROPHILS", "PMN", "M-MDSC", 
                           "LOX1-PMN-MDSC", "MONOCYTES"),
@@ -53,7 +53,7 @@ CONFIG <- list(
     
     "Panel_4_Differentiation_Spectrum" = c("CM", "EFF", "EM", "NAIVE"),
     
-    "Panel_5_CD137" = c("CD137TOT", "CD28", "CD137CD4", "CD137CD8", 
+    "Panel_5_CD137" = c("CD137", "CD28", "CD137CD4", "CD137CD8", 
                   "CD137CM", "CD137EMRA", "CD137NAIVE", "CD137EFF", 
                   "CD137KI67", "CD137PD1"),
     
@@ -257,7 +257,7 @@ generate_stats_plots_grouped <- function(data_list) {
     select(all_of(all_markers_in_data)) %>%
     pivot_longer(everything(), names_to = "Marker", values_to = "Value") %>%
     group_by(Marker) %>%
-    summarize(Total_Var = var(Value, na.rm = TRUE), .groups = 'drop') %>%
+    dplyr::summarize(Total_Var = var(Value, na.rm = TRUE), .groups = 'drop') %>%
     filter(Total_Var > 0) %>%
     pull(Marker)
   
