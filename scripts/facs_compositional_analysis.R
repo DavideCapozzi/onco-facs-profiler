@@ -1,9 +1,5 @@
 # ==============================================================================
-# FACS IMMUNOPHENOTYPING ANALYSIS PIPELINE - v3 (GROUPED PLOTS)
-# ==============================================================================
-# Role: Data Scientist & Immunologist
-# Context: Multi-tumor comparison (HNSCC, NSCLC) vs Healthy Donors
-# Updates: Explicit Logging, Dual PCA, Grouped Boxplots
+# FACS IMMUNOPHENOTYPING ANALYSIS PIPELINE 
 # ==============================================================================
 
 # 1. LIBRARY SETUP -------------------------------------------------------------
