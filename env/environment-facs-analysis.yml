@@ -41,7 +41,11 @@ dependencies:
   - r-corrplot         # Visualization of correlation matrices
   - r-ggraph           # Network visualization (extends ggplot2)
   - r-ggtern           # Ternary plots
-  - r-janitor 
+  - r-janitor
+  - r-qgraph
+  - r-networkcomparisontest 
+  - r-psych
+  - r-fdrtool
 
   # === CORE COMPOSITIONALITY PACKAGES ===
   - bioconductor-aldex2       # Primary Method (Bayesian)
