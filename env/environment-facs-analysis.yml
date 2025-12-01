@@ -52,6 +52,7 @@ dependencies:
   - r-zcompositions           # Imputation and transformation
   - r-compositions>=2.0       # Core CoDA analysis
   - r-hmisc                   # Harrell Miscellaneous (correlation functions)
+  - r-vim
 
   # === PROPELLER (VIA SPECKLE) ===
   - bioconductor-speckle      # Propeller method
