@@ -86,6 +86,7 @@ dependencies:
   # === STATISTICS ===
   - r-pwr              # Power analysis (Critical per PDF recommendations)
   - bioconductor-multtest
+  - r-vegan
 
   # === BIOCONDUCTOR CORE ===
   - bioconductor-biobase
