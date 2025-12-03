@@ -2,7 +2,7 @@
 # SCRIPT 03: DIFFERENTIAL NETWORK ANALYSIS
 # PURPOSE: Permutation test for Spearman correlations (Tumor vs Healthy)
 # INPUT: clean_data.rds
-# OUTPUT: Network visualizations, Edges Excel
+# OUTPUT: Network visualizations (Diff + Single), Edges Excel
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -17,7 +17,7 @@ suppressPackageStartupMessages({
 # 1. CONFIGURATION -------------------------------------------------------------
 CONFIG <- list(
   input_file = "/home/davidec/projects/compositional_analysis/processed_data/clean_data.rds",
-  output_dir = "/home/davidec/projects/compositional_analysis/results/03_Network",
+  output_dir = "/home/davidec/projects/compositional_analysis/results_fixed/03_Network",
   
   # Define Comparison Groups
   group_healthy = "Healthy",
@@ -26,7 +26,8 @@ CONFIG <- list(
   # Network Parameters
   n_permutations = 1000,
   fdr_threshold = 0.05,
-  min_delta_rho = 0.30,   
+  min_delta_rho = 0.30,      # Cutoff for Differential Network
+  min_rho_single = 0.30,     # Cutoff for Single Networks (Visual only)
   n_cores = parallel::detectCores() - 1
 )
 
@@ -98,12 +99,11 @@ cat("[3] Exporting Results...\n")
 # FDR
 p_adj_mat <- matrix(p.adjust(results$p_val[upper.tri(results$p_val)], method="fdr"), 
                     nrow=nrow(results$p_val), ncol=ncol(results$p_val))
-# (Simplified reconstruction for export - mainly utilizing the list structure)
 
 # Edges List
 edges <- reshape2::melt(results$diff)
 colnames(edges) <- c("Node1", "Node2", "Delta_Rho")
-edges$P_FDR <- reshape2::melt(results$p_val)$value # Using raw P for now, adjust if strictly FDR needed
+edges$P_FDR <- reshape2::melt(results$p_val)$value 
 
 edges_sig <- edges %>%
   filter(as.character(Node1) < as.character(Node2)) %>%
@@ -113,14 +113,38 @@ edges_sig <- edges %>%
 
 write.xlsx(edges_sig, file.path(CONFIG$output_dir, "Significant_Edges.xlsx"))
 
-# Plot
-pdf(file.path(CONFIG$output_dir, "Differential_Network_PanCancer.pdf"), width = 12, height = 8)
+# --- VISUALIZATION UPDATE ---
+cat("   -> Generating Network Plots (Differential + Individual)...\n")
+
+pdf(file.path(CONFIG$output_dir, "Differential_Network_PanCancer.pdf"), width = 14, height = 8)
+
+# Calculate Layout based on Healthy (most stable reference)
 L <- qgraph(results$r_healthy, DoNotPlot=TRUE)$layout
+
+# PAGE 1: Differential Network
 qgraph(results$diff, layout=L, graph = "default", diag=FALSE,
-       title = "Differential Network (Tumor [NSCLC+HNSCC] - Healthy)",
+       title = "Differential Network (Tumor [NSCLC+HNSCC] - Healthy)\nRed = Stronger in Tumor | Blue = Stronger in Healthy",
        minimum = CONFIG$min_delta_rho, cut = CONFIG$min_delta_rho,
-       posCol = "darkred", negCol = "darkblue", vsize = 4, labels = colnames(results$diff))
+       posCol = "darkred", negCol = "darkblue", vsize = 4, 
+       labels = colnames(results$diff), label.cex = 0.9)
+
+# PAGE 2: Side by Side Single Networks
+par(mfrow=c(1,2)) # Split view
+
+# Plot Tumor
+qgraph(results$r_tumor, layout=L, graph = "cor", diag=FALSE,
+       title = "Tumor Network (Spearman)",
+       minimum = CONFIG$min_rho_single, cut = CONFIG$min_rho_single,
+       posCol = "darkred", negCol = "darkblue", vsize = 4, 
+       labels = colnames(results$diff), label.cex = 0.8)
+
+# Plot Healthy
+qgraph(results$r_healthy, layout=L, graph = "cor", diag=FALSE,
+       title = "Healthy Network (Spearman)",
+       minimum = CONFIG$min_rho_single, cut = CONFIG$min_rho_single,
+       posCol = "darkred", negCol = "darkblue", vsize = 4, 
+       labels = colnames(results$diff), label.cex = 0.8)
+
 dev.off()
 
 cat("   -> Done! Results in 'results/03_Network/'\n")
-

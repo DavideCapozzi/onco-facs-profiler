@@ -18,7 +18,7 @@ suppressPackageStartupMessages({
 # 1. CONFIGURATION -------------------------------------------------------------
 CONFIG <- list(
   input_file = "/home/davidec/projects/compositional_analysis/processed_data/clean_data.rds",
-  output_dir = "/home/davidec/projects/compositional_analysis/results/02_Stats",
+  output_dir = "/home/davidec/projects/compositional_analysis/results_fixed/02_Stats",
   # Added color for HNSCC
   colors = c("Healthy" = "#2E8B57", "NSCLC" = "#4682B4", "HNSCC" = "#CD5C5C") 
 )

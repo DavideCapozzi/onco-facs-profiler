@@ -16,9 +16,9 @@ suppressPackageStartupMessages({
 
 # 2. CONFIGURATION -------------------------------------------------------------
 CONFIG <- list(
-  input_file = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov2.xlsx",
+  input_file = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov3.xlsx",
   output_dir = "/home/davidec/projects/compositional_analysis/processed_data",
-  qc_dir = "/home/davidec/projects/compositional_analysis/results/01_QC",
+  qc_dir = "/home/davidec/projects/compositional_analysis/results_fixed/01_QC",
   
   # Cohorts to process (HNSCC included as requested)
   sheets = list(
@@ -30,7 +30,7 @@ CONFIG <- list(
   # QC Thresholds (RELAXED to visualize HNSCC)
   # Previous strict: 0.30. New relaxed: 0.55 to keep bad HNSCC samples for PCA check.
   max_na_row = 0.55,  
-  max_na_col = 0.35   
+  max_na_col = 0.20  
 )
 
 # Create directories
