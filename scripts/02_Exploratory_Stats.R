@@ -9,7 +9,7 @@ suppressPackageStartupMessages({
   library(tidyverse)
   library(FactoMineR)
   library(factoextra)
-  library(vegan)         # PERMANOVA
+  library(vegan)        
   library(ggpubr)
   library(openxlsx)
   library(ggrepel)
@@ -81,7 +81,7 @@ cat("[3] Generating Marker Boxplots (Raw Data)...\n")
 
 df_raw <- DATA$raw_filtered
 long_df <- df_raw %>%
-  select(Patient_ID, Group, all_of(markers)) %>%
+  dplyr::select(Patient_ID, Group, all_of(markers)) %>%
   pivot_longer(cols = -c(Patient_ID, Group), names_to = "Marker", values_to = "Value")
 
 p_box <- ggplot(long_df, aes(x = Group, y = Value, fill = Group)) +

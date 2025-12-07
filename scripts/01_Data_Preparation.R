@@ -1,6 +1,6 @@
 # ==============================================================================
 # SCRIPT 01: DATA PREPARATION & NORMALIZATION
-# PURPOSE: Centralized cleaning, imputation, and transformation pipeline.
+# PURPOSE: Centralized cleaning, imputation (kNN optimization), and transformation.
 # INPUT: Raw Excel file
 # OUTPUT: .rds object containing processed lists (Raw, Imputed, CLR)
 # ==============================================================================
@@ -12,6 +12,8 @@ suppressPackageStartupMessages({
   library(VIM)            # kNN Imputation
   library(zCompositions)  # Compositional Zero Handling
   library(openxlsx)
+  library(ggplot2)        # For optimization plots
+  library(Metrics)        # For RMSE calculation
 })
 
 # 2. CONFIGURATION -------------------------------------------------------------
@@ -20,17 +22,21 @@ CONFIG <- list(
   output_dir = "/home/davidec/projects/compositional_analysis/processed_data",
   qc_dir = "/home/davidec/projects/compositional_analysis/results_fixed/01_QC",
   
-  # Cohorts to process (HNSCC included as requested)
+  # Cohorts to process
   sheets = list(
     "NSCLC" = "NSCLC",
     "Healthy" = "Healthy_Donors",
     "HNSCC" = "HNSCC" 
   ),
   
-  # QC Thresholds (RELAXED to visualize HNSCC)
-  # Previous strict: 0.30. New relaxed: 0.55 to keep bad HNSCC samples for PCA check.
+  # QC Thresholds
   max_na_row = 0.55,  
-  max_na_col = 0.20  
+  max_na_col = 0.20,
+  
+  # kNN Optimization Parameters
+  optimize_k = TRUE,
+  k_default = 3,
+  k_range = 3:10
 )
 
 # Create directories
@@ -68,7 +74,6 @@ for(grp_name in names(CONFIG$sheets)) {
     df_list[[grp_name]] <- tmp_clean
     cat(sprintf("   -> Loaded %s: %d samples\n", grp_name, nrow(tmp_clean)))
   }, error = function(e) {
-    # If a sheet is missing, warn but don't stop
     cat(sprintf("   [WARNING] Could not load sheet '%s'. Skipping.\n", sheet))
   })
 }
@@ -76,7 +81,8 @@ for(grp_name in names(CONFIG$sheets)) {
 full_data <- bind_rows(df_list)
 meta_cols <- c("Patient_ID", "Group")
 marker_cols <- setdiff(names(full_data), meta_cols)
-# Remove columns that are 100% NA
+
+# Remove columns that are 100% NA (Safety check)
 full_data <- full_data[, colSums(is.na(full_data)) < nrow(full_data)]
 marker_cols <- setdiff(names(full_data), meta_cols)
 
@@ -89,11 +95,7 @@ row_na <- rowMeans(is.na(df_num))
 col_na <- colMeans(is.na(df_num))
 
 # Save QC Report
-qc_df <- data.frame(
-  ID = full_data$Patient_ID,
-  Group = full_data$Group,
-  Missing_Pct = row_na
-)
+qc_df <- data.frame(ID = full_data$Patient_ID, Group = full_data$Group, Missing_Pct = row_na)
 write.xlsx(qc_df, file.path(CONFIG$qc_dir, "Missingness_Report.xlsx"))
 
 # Filter Rows (Patients)
@@ -116,14 +118,74 @@ if(length(bad_cols) > 0) {
 marker_cols <- setdiff(names(full_data), meta_cols)
 df_final_raw <- full_data 
 
-# --- C. Imputation & Transformation ---
-cat("[3] Imputation & Transformation...\n")
+# --- C. Parameter Optimization (kNN) ---
+cat("[3] Optimizing Imputation Parameters (kNN)...\n")
+k_final <- CONFIG$k_default # Initialize with default
+
+if(CONFIG$optimize_k) {
+  # Setup data for simulation (use numeric columns)
+  test_data <- full_data[, marker_cols]
+  complete_rows <- complete.cases(test_data)
+  ground_truth <- test_data[complete_rows, ]
+  
+  if(nrow(ground_truth) < 20) {
+    cat("   [WARNING] Not enough complete rows (<20) to optimize k. Using default k=3.\n")
+  } else {
+    cat(sprintf("   -> Running simulation on %d complete rows...\n", nrow(ground_truth)))
+    
+    results_k <- data.frame()
+    n_reps <- 5
+    prop_na <- 0.05
+    
+    # Simulation Loop
+    for(k in CONFIG$k_range) {
+      errors <- numeric(n_reps)
+      for(i in 1:n_reps) {
+        set.seed(123 + i)
+        # Create artificial NAs
+        na_mat <- as.matrix(ground_truth)
+        n_vals <- prod(dim(na_mat))
+        miss_idx <- sample(n_vals, floor(n_vals * prop_na))
+        actual_vals <- na_mat[miss_idx]
+        na_mat[miss_idx] <- NA
+        
+        # Impute
+        imputed_df <- VIM::kNN(as.data.frame(na_mat), k = k, imp_var = FALSE)
+        
+        # Calculate NRMSE
+        imp_vals <- as.matrix(imputed_df)[miss_idx]
+        rmse <- sqrt(mean((imp_vals - actual_vals)^2))
+        errors[i] <- rmse / (max(actual_vals) - min(actual_vals))
+      }
+      avg_err <- mean(errors)
+      results_k <- rbind(results_k, data.frame(k = k, NRMSE = avg_err))
+      cat(sprintf("     -> k=%2d | Avg NRMSE: %.4f\n", k, avg_err))
+    }
+    
+    # Select Best k
+    best_k <- results_k$k[which.min(results_k$NRMSE)]
+    k_final <- best_k
+    cat(sprintf("   -> [RESULT] Optimal k detected: %d\n", k_final))
+    
+    # Save Plot
+    p_k <- ggplot(results_k, aes(x=k, y=NRMSE)) +
+      geom_line(color="#2E8B57") + geom_point(size=3) +
+      geom_vline(xintercept=best_k, linetype="dashed", color="red") +
+      theme_bw() + labs(title="kNN Parameter Optimization", y="Imputation Error (NRMSE)")
+    ggsave(file.path(CONFIG$qc_dir, "kNN_Optimization.png"), p_k, width=6, height=4)
+  }
+}
+
+# --- D. Imputation & Transformation ---
+cat(sprintf("[4] Imputation & Transformation (Using k=%d)...\n", k_final))
 df_vals <- full_data[, marker_cols]
 
-# 1. kNN Imputation (Crucial for HNSCC which has holes)
+# 1. kNN Imputation
 if(any(is.na(df_vals))) {
-  cat("   -> Running kNN imputation (k=3)...\n")
-  df_vals <- VIM::kNN(df_vals, k=3, imp_var=FALSE)
+  cat(sprintf("   -> Running kNN imputation (k=%d)...\n", k_final))
+  df_vals <- VIM::kNN(df_vals, k = k_final, imp_var=FALSE)
+} else {
+  cat("   -> No missing values detected. Skipping imputation.\n")
 }
 
 # 2. CZM (for Zeros)
@@ -144,14 +206,15 @@ colnames(df_clr_vals) <- colnames(df_clean)
 # Combine back with metadata
 df_clr_final <- cbind(full_data[, meta_cols], df_clr_vals)
 
-# --- D. Save Master Object ---
-cat("[4] Saving Master Data Object...\n")
+# --- E. Save Master Object ---
+cat("[5] Saving Master Data Object...\n")
 master_data <- list(
   metadata = full_data[, meta_cols],
   raw_filtered = df_final_raw,      
   clr_transformed = df_clr_final,   
   markers = marker_cols,
-  parameters = CONFIG
+  parameters = CONFIG,
+  optimal_k = k_final # Save the k used for reference
 )
 
 saveRDS(master_data, file.path(CONFIG$output_dir, "clean_data.rds"))

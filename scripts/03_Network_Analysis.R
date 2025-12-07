@@ -24,9 +24,9 @@ CONFIG <- list(
   group_healthy = "Healthy",
   
   # Network Parameters
-  n_permutations = 1000,
+  n_permutations = 5000,
   fdr_threshold = 0.05,
-  min_delta_rho = 0.30,
+  min_delta_rho = 0.20,
   min_rho_single = 0.30,
   n_cores = parallel::detectCores() - 1
 )
