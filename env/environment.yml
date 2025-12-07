@@ -1,0 +1,96 @@
+name: facs-comp-analysis
+
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+
+pin_subdir: linux-64
+
+dependencies:
+  # === BASE R ===
+  - r-base=4.3.*
+  
+  # === EXPLICIT CRITICAL DEPENDENCIES ===
+  # r-cairo pulls in cairo, pango, fontconfig automatically
+  - r-cairo            
+  - r-lattice          
+  - r-rcolorbrewer     
+  - r-interp           
+  - r-latticeextra     
+
+  # === DATA MANIPULATION & VISUALIZATION (TIDYVERSE) ===
+  - r-tidyverse
+  - r-factoextra       
+  - r-ggpubr           
+  - r-cowplot          
+  - r-patchwork        
+  - r-viridis          
+  - r-corrplot         
+  - r-ggraph           
+  # Removed r-ggtern to avoid potential conflicts with newer ggplot2 versions
+  # - r-ggtern         
+  - r-janitor
+  - r-qgraph
+  # r-metrics moved here for visibility
+  - r-metrics
+  - r-psych
+  - r-fdrtool
+  # networkcomparisontest is often very specific, kept but monitor it
+  - r-networkcomparisontest 
+
+  # === CORE COMPOSITIONALITY PACKAGES ===
+  - bioconductor-aldex2       
+  - r-zcompositions           
+  - r-compositions>=2.0       
+  - r-hmisc                   
+  - r-vim
+
+  # === PROPELLER (VIA SPECKLE) ===
+  - bioconductor-speckle      
+  - bioconductor-limma        
+
+  # === BATCH CORRECTION & IMPUTATION ===
+  - bioconductor-sva          
+  - r-mice                    
+
+  # === NETWORK ANALYSIS ===
+  - r-igraph>=2.0
+  - r-tidygraph               
+
+  # === CLUSTERING & SURVIVAL ===
+  - bioconductor-consensusclusterplus 
+  - bioconductor-complexheatmap       
+  - r-survival                        
+  - r-survminer                       
+  - r-wgcna                           
+
+  # === UTILITY PACKAGES ===
+  - r-rmarkdown
+  - r-knitr
+  - r-reshape2
+  - r-data.table
+  - r-dt               
+  - r-biocmanager      
+  - r-openxlsx
+  - r-writexl
+
+  # === STATISTICS ===
+  - r-pwr              
+  - bioconductor-multtest
+  - r-vegan
+
+  # === BIOCONDUCTOR CORE ===
+  - bioconductor-biobase
+  - bioconductor-biocgenerics
+  - bioconductor-s4vectors
+  - bioconductor-iranges
+  - bioconductor-genomicranges
+  
+  # === DEVELOPMENT TOOLS ===
+  - git
+  - make
+  - cmake
+  - pandoc             
+  - r-devtools         
+  - r-remotes
