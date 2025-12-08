@@ -79,7 +79,7 @@ if(length(unique(df_clr$Group)) > 1) {
 # 4. MARKER BOXPLOTS -----------------------------------------------------------
 cat("[3] Generating Marker Boxplots (Raw Data)...\n")
 
-df_raw <- DATA$raw_filtered
+df_raw <- DATA$raw_imputed
 long_df <- df_raw %>%
   dplyr::select(Patient_ID, Group, all_of(markers)) %>%
   pivot_longer(cols = -c(Patient_ID, Group), names_to = "Marker", values_to = "Value")

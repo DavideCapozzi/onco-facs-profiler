@@ -261,6 +261,7 @@ cat("[6] Saving Master Data Object...\n")
 master_data <- list(
   metadata = full_data[, meta_cols],
   raw_filtered = df_final_raw,      
+  raw_imputed = df_clean,  
   clr_transformed = df_clr_final,   
   markers = marker_cols,
   parameters = CONFIG,
