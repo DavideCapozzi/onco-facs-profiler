@@ -44,7 +44,7 @@ dependencies:
   - r-zcompositions           
   - r-compositions>=2.0       
   - r-hmisc                   
-  - r-vim
+  - r-robcompositions
 
   # === PROPELLER (VIA SPECKLE) ===
   - bioconductor-speckle      
