@@ -17,7 +17,7 @@ suppressPackageStartupMessages({
 # 1. CONFIGURATION -------------------------------------------------------------
 CONFIG <- list(
   input_file = "/home/davidec/projects/compositional_analysis/processed_data/clean_data.rds",
-  output_dir = "/home/davidec/projects/compositional_analysis/results_fixed/03_Network",
+  output_dir = "/home/davidec/projects/compositional_analysis/results/03_Network",
   export_dir = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/networks",
   
   # Define Comparison Groups
@@ -43,15 +43,15 @@ markers <- DATA$markers
 
 # Pan-Cancer Grouping: NOT Healthy = Tumor (NSCLC + HNSCC)
 df_analysis <- df_clr %>%
-  mutate(Network_Group = ifelse(Group == CONFIG$group_healthy, "Healthy", "Tumor"))
+  dplyr::mutate(Network_Group = ifelse(Group == CONFIG$group_healthy, "Healthy", "Tumor"))
 
 tumor_data <- df_analysis %>% 
-  filter(Network_Group == "Tumor") %>% 
-  select(all_of(markers))
+  dplyr::filter(Network_Group == "Tumor") %>% 
+  dplyr::select(all_of(markers))
 
 healthy_data <- df_analysis %>% 
-  filter(Network_Group == "Healthy") %>% 
-  select(all_of(markers))
+  dplyr::filter(Network_Group == "Healthy") %>% 
+  dplyr::select(all_of(markers))
 
 cat(sprintf("   -> [INFO] Grouping Strategy: Pan-Cancer Analysis\n"))
 cat(sprintf("   -> Tumor (NSCLC + HNSCC): %d samples\n", nrow(tumor_data)))
@@ -181,9 +181,9 @@ edges_diff_all <- create_edge_table(
 
 # Filter significant edges only
 edges_diff_sig <- edges_diff_all %>%
-  filter(P_FDR < CONFIG$fdr_threshold & abs(Weight) > CONFIG$min_delta_rho) %>%
-  arrange(P_FDR) %>%
-  select(Source, Target, Delta_Rho = Weight, P_Value, P_FDR, Category = Interaction_Class)
+  dplyr::filter(P_FDR < CONFIG$fdr_threshold & abs(Weight) > CONFIG$min_delta_rho) %>%
+  dplyr::arrange(P_FDR) %>%
+  dplyr::select(Source, Target, Delta_Rho = Weight, P_Value, P_FDR, Category = Interaction_Class)
 
 # Export significant edges
 write.xlsx(edges_diff_sig, 
@@ -198,7 +198,7 @@ cat(sprintf("   -> [INFO] Found %d significant edges (FDR < %.2f, |Delta_Rho| > 
 
 # Export full differential network (for Cytoscape/ggraph)
 edges_diff_export <- edges_diff_all %>%
-  select(Source, Target, Weight, P_Value, Network, P_FDR, Interaction_Class)
+  dplyr::select(Source, Target, Weight, P_Value, Network, P_FDR, Interaction_Class)
 
 write.csv(edges_diff_export, 
           file.path(CONFIG$export_dir, "Network_Differential.csv"), 
@@ -219,7 +219,7 @@ edges_tumor <- create_edge_table(
   p_mat = NULL,
   net_type = "Tumor_Only"
 ) %>%
-  select(Source, Target, Weight, Network, Interaction_Class)
+  dplyr::select(Source, Target, Weight, Network, Interaction_Class)
 
 write.csv(edges_tumor, 
           file.path(CONFIG$export_dir, "Network_Tumor.csv"), 
@@ -234,7 +234,7 @@ edges_healthy <- create_edge_table(
   p_mat = NULL,
   net_type = "Healthy_Only"
 ) %>%
-  select(Source, Target, Weight, Network, Interaction_Class)
+  dplyr::select(Source, Target, Weight, Network, Interaction_Class)
 
 write.csv(edges_healthy, 
           file.path(CONFIG$export_dir, "Network_Healthy.csv"), 

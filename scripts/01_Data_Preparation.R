@@ -20,7 +20,7 @@ suppressPackageStartupMessages({
 CONFIG <- list(
   input_file = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov3.xlsx",
   output_dir = "/home/davidec/projects/compositional_analysis/processed_data",
-  qc_dir = "/home/davidec/projects/compositional_analysis/results_fixed/01_QC",
+  qc_dir = "/home/davidec/projects/compositional_analysis/results/01_QC",
   
   # Cohorts to process
   sheets = list(
@@ -254,14 +254,16 @@ df_clr_vals <- as.data.frame(df_clr_vals)
 colnames(df_clr_vals) <- colnames(df_clean)
 
 # Combine back with metadata
+df_imputed_final <- cbind(full_data[, meta_cols], df_clean)
 df_clr_final <- cbind(full_data[, meta_cols], df_clr_vals)
+
 
 # --- F. Save Master Object ---
 cat("[6] Saving Master Data Object...\n")
 master_data <- list(
   metadata = full_data[, meta_cols],
   raw_filtered = df_final_raw,      
-  raw_imputed = df_clean,  
+  raw_imputed = df_imputed_final,  
   clr_transformed = df_clr_final,   
   markers = marker_cols,
   parameters = CONFIG,
