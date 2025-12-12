@@ -18,15 +18,17 @@ suppressPackageStartupMessages({
 
 # 2. CONFIGURATION -------------------------------------------------------------
 CONFIG <- list(
-  input_file = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov3.xlsx",
+  input_file = "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov4.xlsx",
   output_dir = "/home/davidec/projects/compositional_analysis/processed_data",
   qc_dir = "/home/davidec/projects/compositional_analysis/results/01_QC",
   
   # Cohorts to process
   sheets = list(
     "NSCLC" = "NSCLC",
-    "Healthy" = "Healthy_Donors",
-    "HNSCC" = "HNSCC" 
+    "NSCLC_LS" = "NSCLC_LS",
+    "HNSCC" = "HNSCC", 
+    "HNSCC_LS" = "HNSCC_LS", 
+    "Healthy" = "Healthy_Donors"
   ),
   
   # QC Thresholds
