@@ -1,0 +1,46 @@
+# ==============================================================================
+# PROJECT CONFIGURATION: CLR Network Inference
+# ==============================================================================
+
+# --- File Paths ---
+# Use absolute paths or relative to project root
+input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov4.xlsx"
+output_root: "results"
+
+# --- Groups & Cohorts ---
+cohorts:
+  NSCLC: "NSCLC"
+  HNSCC: "HNSCC"
+  Healthy: "Healthy_Donors"
+
+# Analysis Groupings
+control_group: "Healthy"
+case_groups: ["NSCLC", "HNSCC"]
+
+# --- Visuals ---
+colors:
+  Healthy: "#2E8B57"  # SeaGreen
+  NSCLC: "#4682B4"    # SteelBlue
+  HNSCC: "#CD5C5C"    # IndianRed
+
+# --- Quality Control ---
+qc:
+  max_na_row_pct: 0.55  # Drop patients with >55% NA
+  max_na_col_pct: 0.20  # Drop markers with >20% NA
+
+# --- Imputation (CoDa) ---
+imputation:
+  knn_k_default: 3
+  knn_optimize: true
+  knn_range: [3, 4, 5, 6, 7, 8, 9, 10]
+  # Warning: "median_hack" relies on legacy logic (Median injection before CZM)
+  method: "median_hack_then_knn" 
+
+# --- Inference Statistics ---
+stats:
+  seed: 2025
+  n_boot: 1000        # Bootstrap iterations
+  n_perm: 2000        # Permutation iterations
+  alpha: 0.05         # Significance level
+  fdr_threshold: 0.05 # BH Correction
+  n_cores: "auto"     # "auto" uses detectCores() - 1

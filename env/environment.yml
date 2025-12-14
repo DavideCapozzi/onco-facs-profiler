@@ -11,8 +11,11 @@ dependencies:
   # === BASE R ===
   - r-base=4.3.*
   
+  # === CONFIGURATION & IO (ADDED) ===
+  - r-yaml             
+  - r-readxl           
+
   # === EXPLICIT CRITICAL DEPENDENCIES ===
-  # r-cairo pulls in cairo, pango, fontconfig automatically
   - r-cairo            
   - r-lattice          
   - r-rcolorbrewer     
@@ -22,21 +25,18 @@ dependencies:
   # === DATA MANIPULATION & VISUALIZATION (TIDYVERSE) ===
   - r-tidyverse
   - r-factoextra       
+  - r-factominer     
   - r-ggpubr           
   - r-cowplot          
   - r-patchwork        
   - r-viridis          
   - r-corrplot         
   - r-ggraph           
-  # Removed r-ggtern to avoid potential conflicts with newer ggplot2 versions
-  # - r-ggtern         
   - r-janitor
   - r-qgraph
-  # r-metrics moved here for visibility
   - r-metrics
   - r-psych
   - r-fdrtool
-  # networkcomparisontest is often very specific, kept but monitor it
   - r-networkcomparisontest 
 
   # === CORE COMPOSITIONALITY PACKAGES ===
@@ -54,9 +54,16 @@ dependencies:
   - bioconductor-sva          
   - r-mice                    
 
-  # === NETWORK ANALYSIS ===
+  # === NETWORK ANALYSIS & ROBUST STATISTICS (UPDATED) ===
   - r-igraph>=2.0
-  - r-tidygraph               
+  - r-tidygraph
+  - r-corpcor         
+  - r-huge            
+  - r-pulsar         
+
+  # === PARALLEL COMPUTING (ADDED) ===
+  - r-doparallel       
+  - r-foreach          
 
   # === CLUSTERING & SURVIVAL ===
   - bioconductor-consensusclusterplus 
@@ -66,6 +73,7 @@ dependencies:
   - r-wgcna                           
 
   # === UTILITY PACKAGES ===
+  - r-conflicted
   - r-rmarkdown
   - r-knitr
   - r-reshape2
