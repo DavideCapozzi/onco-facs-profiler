@@ -30,11 +30,7 @@ qc:
 
 # --- Imputation (CoDa) ---
 imputation:
-  method: "czm_opt_knn"     
-  knn_optimize: true        
-  knn_min: 3
-  knn_max: 10
-  knn_k_default: 3         
+  method: "czm_multrepl"      
 
 # --- Inference Statistics ---
 stats:

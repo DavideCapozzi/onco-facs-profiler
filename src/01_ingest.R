@@ -115,7 +115,7 @@ qc_summary$n_col_final <- ncol(mat_raw)
 
 message(sprintf("   [QC] Final Dimensions: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
-# --- NEW: SAVE EXCEL REPORT ---
+# Save QC Report
 out_dir <- file.path(config$output_root, "01_QC")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
@@ -127,30 +127,22 @@ if (nrow(mat_raw) < 10) warning("[QC] WARNING: Very low sample size. Analysis ma
 # 4. CoDa Pipeline Execution
 # ------------------------------------------------------------------------------
 
-# A. Zero Handling (Mask -> Fill -> Fix -> Restore)
+# A. Zero Handling (Mask -> Fill -> CZM -> Restore)
+# This step handles rounded zeros but leaves true NAs in place.
 mat_no_zeros <- replace_zeros_czm(mat_raw)
 
-# B. NA Imputation (Optimization + Imputation)
-final_k <- config$imputation$knn_k_default 
+# B. NA Imputation (Multiplicative Replacement)
+# We handle remaining NAs using a deterministic approach rather than stochastic kNN.
+message("[CoDa] Handling remaining NAs (if any) via multiplicative replacement...")
+mat_imputed <- impute_nas_simple(mat_no_zeros)
 
-if (config$imputation$knn_optimize) {
-  # Range 3 to 10 (or less if few samples)
-  k_max <- min(10, floor(nrow(mat_raw) * 0.5)) # Safety cap for small N
-  k_range <- 3:k_max
-  
-  if(length(k_range) > 1) {
-    opt_results <- optimize_knn_k(mat_no_zeros, k_seq = k_range)
-    final_k <- opt_results$best_k
-    
-    # Save Plot
-    qc_dir <- file.path(config$output_root, "01_QC")
-    if (!dir.exists(qc_dir)) dir.create(qc_dir, recursive = TRUE)
-    ggsave(file.path(qc_dir, "imputation_optimization_k.pdf"), opt_results$plot, width=6, height=4)
-  }
+# --- VALIDATION SAFETY CHECKS ---
+if (any(is.na(mat_imputed))) {
+  stop("[FATAL] Imputation failed: NAs remain in matrix. Check input data or imputation logic.")
 }
-
-message(sprintf("[CoDa] Applying Imputation with k=%d...", final_k))
-mat_imputed <- impute_knn_aitchison(mat_no_zeros, k = final_k)
+if (any(mat_imputed <= 0)) {
+  stop("[FATAL] Invalid values detected post-imputation (zeros or negatives). CoDa requires strictly positive data.")
+}
 
 # C. CLR Transformation
 mat_clr <- transform_clr(mat_imputed)
