@@ -4,7 +4,7 @@
 
 # --- File Paths ---
 # Use absolute paths or relative to project root
-input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_anonimo_standardizzatov4.xlsx"
+input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
 output_root: "results"
 
 # --- Groups & Cohorts ---
@@ -30,11 +30,11 @@ qc:
 
 # --- Imputation (CoDa) ---
 imputation:
-  knn_k_default: 3
-  knn_optimize: true
-  knn_range: [3, 4, 5, 6, 7, 8, 9, 10]
-  # Warning: "median_hack" relies on legacy logic (Median injection before CZM)
-  method: "median_hack_then_knn" 
+  method: "czm_opt_knn"     
+  knn_optimize: true        
+  knn_min: 3
+  knn_max: 10
+  knn_k_default: 3         
 
 # --- Inference Statistics ---
 stats:
