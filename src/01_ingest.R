@@ -73,7 +73,7 @@ if (length(drop_row_idx) > 0) {
   
   # 3. Apply Filter
   mat_raw  <- mat_raw[-drop_row_idx, ]
-  raw_data <- raw_data[-drop_row_idx, ] # Sync Metadata
+  raw_data <- raw_data[-drop_row_idx, ]
 } else {
   qc_summary$n_row_dropped <- 0
 }
@@ -116,7 +116,7 @@ qc_summary$n_col_final <- ncol(mat_raw)
 message(sprintf("   [QC] Final Dimensions: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
 # --- NEW: SAVE EXCEL REPORT ---
-out_dir <- file.path(config$output_root, "01_processed")
+out_dir <- file.path(config$output_root, "01_QC")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 save_qc_report(qc_summary, file.path(out_dir, "QC_Filtering_Report.xlsx"))
@@ -164,14 +164,13 @@ df_clr     <- cbind(raw_data[, meta_cols], as.data.frame(mat_clr))
 # Create Master Object
 processed_data <- list(
   metadata     = raw_data[, meta_cols],
-  markers      = marker_cols,       # UPDATED LIST
+  markers      = marker_cols,      
   raw_matrix   = mat_raw,
   imputed_data = df_imputed,
   clr_data     = df_clr,
   config       = config
 )
 
-out_dir <- file.path(config$output_root, "01_QC")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 saveRDS(processed_data, file.path(out_dir, "data_processed.rds"))

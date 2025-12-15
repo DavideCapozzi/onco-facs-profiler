@@ -48,8 +48,14 @@ message(" STEP 3: STARTING INFERENCE ENGINE")
 message("========================================================")
 source("src/03_inference.R", echo = FALSE)
 
+# --- STEP 3: Statistical Inference ---
+# Handles: Bootstrap Networks, Permutation Tests, FDR
+message("\n========================================================")
+message(" STEP 4: STARTING NETWORK ANALYSIS")
+message("========================================================")
+source("src/04_network_analysis.R", echo = FALSE)
 
-# 4. Completion
+# 5. Completion
 message("\n========================================================")
 message(" [SUCCESS] PIPELINE FINISHED.")
 message(" Results stored in: results/")
