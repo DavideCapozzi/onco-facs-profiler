@@ -9,6 +9,9 @@ library(ggplot2)
 library(FactoMineR)
 library(factoextra)
 library(ggrepel)
+library(igraph)
+library(tidygraph)
+library(ggraph)
 
 #' @title Standard Project Theme
 #' @description A consistent ggplot2 theme for publication-quality figures.
@@ -111,4 +114,69 @@ plot_pca_variables <- function(pca_res) {
                repel = TRUE) +
     labs(title = "Marker Contribution to Variance") +
     theme_coda()
+}
+
+#' @title Plot Network Graph (ggraph)
+#' @description 
+#' Visualizes the inferred network. Nodes are sized by Degree. 
+#' Edges are colored by sign (Blue=Pos, Red=Neg).
+#' 
+#' @param adj_mat Binary adjacency matrix.
+#' @param weight_mat Partial correlation matrix.
+#' @param title Plot title.
+#' @param layout_type ggraph layout (default: "nicely", others: "fr", "kk").
+#' @return A ggplot/ggraph object.
+plot_network_structure <- function(adj_mat, weight_mat, title = "Network", layout_type = "nicely") {
+  
+  # 1. Build Graph Object
+  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
+  
+  # Add attributes
+  E(g)$weight_raw <- NA
+  E(g)$sign <- NA
+  
+  # Get edges
+  el <- igraph::as_data_frame(g, what = "edges")
+  if (nrow(el) > 0) {
+    weights <- numeric(nrow(el))
+    signs   <- character(nrow(el))
+    
+    for(k in 1:nrow(el)) {
+      w <- weight_mat[el[k,1], el[k,2]]
+      weights[k] <- abs(w)
+      signs[k]   <- ifelse(w > 0, "Positive", "Negative")
+    }
+    E(g)$weight <- weights
+    E(g)$sign   <- signs
+  }
+  
+  # Calculate Node Degree for sizing
+  V(g)$degree <- igraph::degree(g)
+  
+  # 2. Plotting
+  # We use tidygraph to wrap igraph for ggraph
+  tg <- tidygraph::as_tbl_graph(g)
+  
+  p <- ggraph(tg, layout = layout_type) + 
+    # Edges
+    geom_edge_link(aes(width = weight, color = sign), alpha = 0.6) +
+    scale_edge_width(range = c(0.2, 1.5), guide = "none") +
+    scale_edge_color_manual(values = c("Positive" = "#00BFC4", "Negative" = "#F8766D")) +
+    
+    # Nodes
+    geom_node_point(aes(size = degree), color = "gray20", fill = "white", shape=21) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 3, max.overlaps = 20) +
+    
+    scale_size_continuous(range = c(2, 8)) +
+    labs(title = title, 
+         subtitle = sprintf("Nodes: %d | Edges: %d", vcount(g), ecount(g)),
+         edge_color = "Association") +
+    theme_void() +
+    theme(
+      plot.title = element_text(face="bold", hjust=0.5),
+      plot.subtitle = element_text(hjust=0.5, color="gray50"),
+      legend.position = "bottom"
+    )
+  
+  return(p)
 }

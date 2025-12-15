@@ -130,3 +130,64 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
     n_boot_valid = n_boots
   ))
 }
+
+#' @title Calculate Network Topology Metrics
+#' @description 
+#' Converts an adjacency/weight matrix pair into an igraph object and calculates
+#' node-level centrality metrics (Degree, Betweenness, Closeness).
+#' 
+#' @param adj_mat Binary adjacency matrix.
+#' @param weight_mat Partial correlation matrix (symmetric).
+#' @return A dataframe of node metrics.
+get_topology_metrics <- function(adj_mat, weight_mat) {
+  requireNamespace("igraph", quietly = TRUE)
+  
+  # create graph from adjacency
+  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
+  
+  # assign weights (absolute value for strength, but centrality usually uses connectivity)
+  # We use the adjacency for structure, weights can be added as attributes
+  
+  if (igraph::vcount(g) == 0) return(NULL)
+  
+  metrics <- data.frame(
+    Node = igraph::V(g)$name,
+    Degree = igraph::degree(g),
+    Betweenness = igraph::betweenness(g, normalized = TRUE),
+    Closeness = igraph::closeness(g, normalized = TRUE),
+    Eigen_Centrality = igraph::eigen_centrality(g)$vector,
+    stringsAsFactors = FALSE
+  )
+  
+  return(metrics)
+}
+
+#' @title Format Network for Cytoscape
+#' @description 
+#' Extracts edges from the matrices and formats them for Cytoscape import.
+#' 
+#' @param adj_mat Binary adjacency matrix.
+#' @param weight_mat Partial correlation matrix.
+#' @return A dataframe with Source, Target, Weight, and Interaction columns.
+format_cytoscape_edges <- function(adj_mat, weight_mat) {
+  requireNamespace("igraph", quietly = TRUE)
+  
+  # Use igraph to extract edge list easily
+  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", weighted = NULL, diag = FALSE)
+  edge_list <- igraph::as_data_frame(g, what = "edges")
+  
+  if (nrow(edge_list) == 0) return(data.frame())
+  
+  # Populate weights and interaction types
+  out_df <- edge_list %>%
+    rowwise() %>%
+    mutate(
+      Weight = weight_mat[from, to],
+      Interaction = ifelse(Weight > 0, "Co-occurrence", "Mutual-Exclusion"),
+      Abs_Weight = abs(Weight)
+    ) %>%
+    dplyr::rename(Source = from, Target = to) %>%
+    ungroup()
+  
+  return(out_df)
+}
