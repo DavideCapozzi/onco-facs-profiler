@@ -26,6 +26,35 @@ rownames(mat_raw) <- raw_data$Patient_ID
 
 message(sprintf("[Data] Initial Matrix: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
+initial_markers <- colnames(mat_raw)
+target_markers  <- initial_markers
+
+# 1. Apply Whitelist (if defined and not empty)
+whitelist <- config$marker_selection$whitelist
+if (!is.null(whitelist) && length(whitelist) > 0) {
+  target_markers <- intersect(target_markers, whitelist)
+  message(sprintf("   [Filter] Applied Whitelist: restricted to %d markers.", length(target_markers)))
+}
+
+# 2. Apply Blacklist (if defined and not empty)
+blacklist <- config$marker_selection$blacklist
+if (!is.null(blacklist) && length(blacklist) > 0) {
+  target_markers <- setdiff(target_markers, blacklist)
+  message(sprintf("   [Filter] Applied Blacklist: removed %d markers.", length(intersect(initial_markers, blacklist))))
+}
+
+# 3. Identify Excluded Markers (for Report)
+dropped_apriori <- setdiff(initial_markers, target_markers)
+df_dropped_apriori <- data.frame(
+  Marker = dropped_apriori,
+  Reason = rep("Excluded by Config (A Priori)", length(dropped_apriori)),
+  stringsAsFactors = FALSE
+)
+
+# 4. Update Matrix
+if (length(target_markers) == 0) stop("[FATAL] All markers were filtered out! Check your config lists.")
+mat_raw <- mat_raw[, target_markers, drop = FALSE]
+
 # 3. Quality Control (Filtering)
 # ------------------------------------------------------------------------------
 message("[QC] Running Quality Control...")
@@ -34,6 +63,7 @@ message("[QC] Running Quality Control...")
 qc_summary <- list(
   n_row_init = nrow(mat_raw),
   n_col_init = ncol(mat_raw),
+  dropped_markers_apriori = df_dropped_apriori,
   n_col_zerovar = 0,
   dropped_rows_detail = data.frame(Patient_ID=character(), NA_Percent=numeric()),
   dropped_cols_detail = data.frame(Marker=character(), NA_Percent=numeric())

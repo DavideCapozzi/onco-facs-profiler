@@ -99,6 +99,13 @@ save_qc_report <- function(qc_list, out_path) {
   
   curr_row <- 1
   
+  if (!is.null(qc_list$dropped_markers_apriori) && nrow(qc_list$dropped_markers_apriori) > 0) {
+    writeData(wb, "Details_Dropped", "Markers Excluded by Config (A Priori):", startRow = curr_row)
+    curr_row <- curr_row + 1
+    writeData(wb, "Details_Dropped", qc_list$dropped_markers_apriori, startRow = curr_row)
+    curr_row <- curr_row + nrow(qc_list$dropped_markers_apriori) + 3
+  }
+  
   # Write Dropped Patients
   if (nrow(qc_list$dropped_rows_detail) > 0) {
     writeData(wb, "Details_Dropped", "Dropped Patients (> Threshold NA):", startRow = curr_row)
