@@ -105,6 +105,69 @@ plot_pca_custom <- function(pca_res, metadata, colors, show_labels = FALSE) {
   return(p)
 }
 
+#' @title Plot MANOVA Separation (Canonical Variate)
+#' @description 
+#' Visualizes the result of the MANOVA by plotting the first Canonical Variate 
+#' (Linear Discriminant), which represents the axis of maximal group separation.
+#' 
+#' @param manova_result The list returned by run_coda_manova().
+#' @param colors Named vector of group colors.
+#' @return A ggplot object (Boxplot + Jitter).
+plot_manova_results <- function(manova_result, colors) {
+  
+  df <- manova_result$plot_data
+  pval <- manova_result$p_value
+  stat <- manova_result$pillai_stat
+  
+  # Format p-value for title
+  pval_str <- ifelse(pval < 0.001, "p < 0.001", sprintf("p = %.4f", pval))
+  
+  ggplot(df, aes(x = Group, y = Canonical_Variate_1, fill = Group)) +
+    geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+    geom_jitter(width = 0.2, size = 2, shape = 21, color = "black", alpha = 0.8) +
+    scale_fill_manual(values = colors) +
+    labs(
+      title = "Global Compositional Difference (MANOVA)",
+      subtitle = sprintf("Statistic: Pillai = %.2f | Significance: %s", stat, pval_str),
+      y = "Canonical Variate 1 (Best Separation Axis)",
+      x = NULL
+    ) +
+    theme_coda() +
+    theme(legend.position = "none")
+}
+
+#' @title Plot MANOVA Loadings (Feature Importance)
+#' @description 
+#' Visualizes which markers drive the separation detected by MANOVA.
+#' Markers are ranked by their correlation with the Canonical Variate.
+#' 
+#' @param manova_result The list returned by run_coda_manova().
+#' @param top_n Number of top markers to show (default 15).
+#' @return A ggplot object (Lollipop chart).
+plot_manova_loadings <- function(manova_result, top_n = 15) {
+  
+  # Get top N markers by absolute loading
+  df <- manova_result$loadings %>%
+    head(top_n)
+  
+  # Determine direction (just for coloring)
+  df$Direction <- ifelse(df$Loading > 0, "Positive", "Negative")
+  
+  ggplot(df, aes(x = Loading, y = reorder(Marker, Loading))) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_segment(aes(yend = Marker, xend = 0, color = Direction), size = 1) +
+    geom_point(aes(color = Direction), size = 3) +
+    labs(
+      title = "Drivers of Separation (MANOVA Loadings)",
+      subtitle = "Correlations between CLR Markers and Canonical Variate 1",
+      x = "Contribution to Separation (Correlation)",
+      y = NULL,
+      color = "Direction"
+    ) +
+    theme_coda() +
+    theme(legend.position = "none")
+}
+
 #' @title Variable Contribution Plot
 #' @description Wraps fviz_pca_var for consistent styling.
 plot_pca_variables <- function(pca_res) {
@@ -127,7 +190,7 @@ plot_pca_variables <- function(pca_res) {
 #' @param layout_type ggraph layout (default: "nicely", others: "fr", "kk").
 #' @return A ggplot/ggraph object.
 plot_network_structure <- function(adj_mat, weight_mat, title = "Network", 
-                                   layout_type = "nicely", min_cor = 0) { # Added min_cor
+                                   layout_type = "nicely", min_cor = 0) { 
   
   # 1. Build Graph Object
   g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
@@ -148,7 +211,7 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
     for(k in 1:nrow(el)) {
       w <- weight_mat[el[k,1], el[k,2]]
       
-      # [CHANGE] Check threshold
+      # Check threshold
       if (abs(w) >= min_cor) {
         keep_edge[k] <- TRUE
         weights[k] <- abs(w)
@@ -170,7 +233,7 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
     }
   }
   
-  # [CHANGE] Recalculate Degree AFTER removing weak edges
+  
   # This ensures node size reflects the *visible* network, not the full statistical network
   V(g)$degree <- igraph::degree(g)
   

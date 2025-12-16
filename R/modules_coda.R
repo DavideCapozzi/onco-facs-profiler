@@ -7,6 +7,7 @@
 
 library(zCompositions)
 library(dplyr)
+library(compositions)
 
 #' @title Zero Replacement via Count Zero Multiplicative (CZM) method
 #' @description 
@@ -149,4 +150,29 @@ transform_clr <- function(mat) {
   clr_mat <- t(apply(mat, 1, function(x) log(x / gmean(x))))
   
   return(clr_mat)
+}
+
+#' @title Isometric Log-Ratio Transformation (ILR)
+#' @description 
+#' Transforms data into D-1 orthogonal coordinates suitable for standard 
+#' multivariate statistics (MANOVA, Regression).
+#' Note: ILR variables do not map 1:1 to markers; they represent balances.
+#' 
+#' @param mat A numeric matrix (positive values only).
+#' @return A matrix of ILR coordinates (n x D-1).
+transform_ilr <- function(mat) {
+  
+  if (any(mat <= 0, na.rm = TRUE)) stop("ILR input must be strictly positive.")
+  
+  message("   [CoDa] Applying ILR transformation (D-1 coordinates)...")
+  
+  # Use the compositions package for robust basis construction
+  # We use the default basis (balanced) as MANOVA is invariant to rotation
+  ilr_obj <- compositions::ilr(compositions::acomp(mat))
+  
+  # Convert back to standard matrix
+  ilr_mat <- as.matrix(ilr_obj)
+  rownames(ilr_mat) <- rownames(mat)
+  
+  return(ilr_mat)
 }

@@ -9,6 +9,72 @@ library(corpcor)
 library(dplyr)
 library(foreach)
 
+#' @title Run CoDa MANOVA (Multivariate Analysis of Variance)
+#' @description 
+#' Performs MANOVA on ILR-transformed data to test global group differences.
+#' Calculates Canonical Variate for visualization and correlations with CLR 
+#' markers for interpretability (Loadings).
+#' 
+#' @param ilr_data Dataframe containing metadata ('Group') and ILR coordinates.
+#' @param clr_data Dataframe containing metadata and CLR markers (for interpretation).
+#' @param metadata_cols Vector of column names to exclude from the matrix.
+#' @return A list containing the MANOVA object, summary, viz scores, and marker loadings.
+run_coda_manova <- function(ilr_data, clr_data, metadata_cols = c("Patient_ID", "Group")) {
+  
+  # 1. Prepare ILR Data (For Statistics)
+  ilr_mat <- as.matrix(ilr_data[, !names(ilr_data) %in% metadata_cols])
+  groups  <- as.factor(ilr_data$Group)
+  
+  # 2. Run MANOVA (on ILR)
+  manova_res <- manova(ilr_mat ~ groups)
+  summ_res <- summary(manova_res, test = "Pillai")
+  
+  stats_df <- as.data.frame(summ_res$stats)
+  pval <- stats_df[1, "Pr(>F)"]
+  pillai <- stats_df[1, "Pillai"]
+  
+  # 3. Canonical Discriminant Analysis (LDA)
+  # This finds the axis of separation
+  requireNamespace("MASS", quietly = TRUE)
+  lda_res <- MASS::lda(groups ~ ilr_mat)
+  
+  # Get scores (The position of each patient on the separation axis)
+  scores <- predict(lda_res, as.data.frame(ilr_mat))$x
+  
+  # 4. Calculate Loadings (Structure Coefficients) - THE EXPLAINABILITY PART
+  # We correlate the CLR markers (interpretable) with the LDA Scores (separation axis)
+  # Ensure clr_data is aligned and numeric
+  clr_mat <- as.matrix(clr_data[, !names(clr_data) %in% metadata_cols])
+  
+  # Check alignment
+  if(nrow(clr_mat) != nrow(scores)) stop("Row mismatch between CLR data and LDA scores.")
+  
+  # Calculate correlation (Robust loadings)
+  # Result is a vector: correlation of each marker with the separation axis
+  loadings <- cor(clr_mat, scores[,1], use = "pairwise.complete.obs")
+  
+  loadings_df <- data.frame(
+    Marker = rownames(loadings),
+    Loading = as.numeric(loadings)
+  ) %>%
+    arrange(desc(abs(Loading))) # Sort by importance
+  
+  # 5. Output
+  plot_data <- data.frame(
+    Patient_ID = ilr_data$Patient_ID,
+    Group = groups,
+    Canonical_Variate_1 = scores[,1]
+  )
+  
+  return(list(
+    model = manova_res,
+    summary = stats_df,
+    p_value = pval,
+    pillai_stat = pillai,
+    plot_data = plot_data,
+    loadings = loadings_df # This is the new part
+  ))
+}
 #' @title Convert Precision Matrix to Partial Correlation
 #' @description 
 #' standardizes the precision matrix (inverse covariance) to partial correlations.

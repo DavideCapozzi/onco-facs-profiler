@@ -177,11 +177,15 @@ if (any(mat_imputed <= 0)) {
 # C. CLR Transformation
 mat_clr <- transform_clr(mat_imputed)
 
+# D. ILR Transformation
+mat_ilr <- transform_ilr(mat_imputed)
+
 # 5. Save Output
 # ------------------------------------------------------------------------------
 # Re-attach metadata
 df_imputed <- cbind(raw_data[, meta_cols], as.data.frame(mat_imputed))
 df_clr     <- cbind(raw_data[, meta_cols], as.data.frame(mat_clr))
+df_ilr     <- cbind(raw_data[, meta_cols], as.data.frame(mat_ilr))
 
 # Create Master Object
 processed_data <- list(
@@ -190,6 +194,7 @@ processed_data <- list(
   raw_matrix   = mat_raw,
   imputed_data = df_imputed,
   clr_data     = df_clr,
+  ilr_data     = df_ilr,
   config       = config
 )
 
