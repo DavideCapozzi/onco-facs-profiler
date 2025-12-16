@@ -2,6 +2,8 @@
 # PROJECT CONFIGURATION: CLR Network Inference
 # ==============================================================================
 
+project_name: "longsurvivors"
+
 # --- File Paths ---
 # Use absolute paths or relative to project root
 input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
@@ -23,6 +25,10 @@ colors:
   NSCLC: "#4682B4"    # SteelBlue
   HNSCC: "#CD5C5C"    # IndianRed
 
+# [NEW] Network Visualization Settings
+viz:
+  min_edge_weight: 0.20 # Edges with absolute partial correlation < 0.20 will be hidden
+  
 # --- Quality Control ---
 qc:
   max_na_row_pct: 0.55  # Drop patients with >55% NA

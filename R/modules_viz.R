@@ -118,15 +118,16 @@ plot_pca_variables <- function(pca_res) {
 
 #' @title Plot Network Graph (ggraph)
 #' @description 
+#' @param min_cor Minimum absolute partial correlation to visualize (default 0).
 #' Visualizes the inferred network. Nodes are sized by Degree. 
 #' Edges are colored by sign (Blue=Pos, Red=Neg).
-#' 
 #' @param adj_mat Binary adjacency matrix.
 #' @param weight_mat Partial correlation matrix.
 #' @param title Plot title.
 #' @param layout_type ggraph layout (default: "nicely", others: "fr", "kk").
 #' @return A ggplot/ggraph object.
-plot_network_structure <- function(adj_mat, weight_mat, title = "Network", layout_type = "nicely") {
+plot_network_structure <- function(adj_mat, weight_mat, title = "Network", 
+                                   layout_type = "nicely", min_cor = 0) { # Added min_cor
   
   # 1. Build Graph Object
   g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
@@ -134,42 +135,64 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network", layou
   # Add attributes
   E(g)$weight_raw <- NA
   E(g)$sign <- NA
+  E(g)$weight <- NA # Initialize
   
   # Get edges
   el <- igraph::as_data_frame(g, what = "edges")
+  
   if (nrow(el) > 0) {
     weights <- numeric(nrow(el))
     signs   <- character(nrow(el))
+    keep_edge <- logical(nrow(el)) # Track edges to keep
     
     for(k in 1:nrow(el)) {
       w <- weight_mat[el[k,1], el[k,2]]
-      weights[k] <- abs(w)
-      signs[k]   <- ifelse(w > 0, "Positive", "Negative")
+      
+      # [CHANGE] Check threshold
+      if (abs(w) >= min_cor) {
+        keep_edge[k] <- TRUE
+        weights[k] <- abs(w)
+        signs[k]   <- ifelse(w > 0, "Positive", "Negative")
+      } else {
+        keep_edge[k] <- FALSE
+      }
     }
-    E(g)$weight <- weights
-    E(g)$sign   <- signs
+    
+    # Prune edges from graph object directly
+    # edges to delete are those where keep_edge is FALSE
+    edges_to_remove <- E(g)[!keep_edge]
+    g <- delete_edges(g, edges_to_remove)
+    
+    # Update attributes for REMAINING edges
+    if (ecount(g) > 0) {
+      E(g)$weight <- weights[keep_edge]
+      E(g)$sign   <- signs[keep_edge]
+    }
   }
   
-  # Calculate Node Degree for sizing
+  # [CHANGE] Recalculate Degree AFTER removing weak edges
+  # This ensures node size reflects the *visible* network, not the full statistical network
   V(g)$degree <- igraph::degree(g)
   
-  # 2. Plotting
-  # We use tidygraph to wrap igraph for ggraph
+  # Optional: Remove isolated nodes if they have 0 degree after filtering?
+  # For now, we keep them so you can see which nodes are present but disconnected.
+  
+  # 2. Plotting (Standard ggraph logic)
   tg <- tidygraph::as_tbl_graph(g)
   
   p <- ggraph(tg, layout = layout_type) + 
-    # Edges
     geom_edge_link(aes(width = weight, color = sign), alpha = 0.6) +
     scale_edge_width(range = c(0.2, 1.5), guide = "none") +
     scale_edge_color_manual(values = c("Positive" = "#00BFC4", "Negative" = "#F8766D")) +
     
-    # Nodes
     geom_node_point(aes(size = degree), color = "gray20", fill = "white", shape=21) +
     geom_node_text(aes(label = name), repel = TRUE, size = 3, max.overlaps = 20) +
     
     scale_size_continuous(range = c(2, 8)) +
     labs(title = title, 
-         subtitle = sprintf("Nodes: %d | Edges: %d", vcount(g), ecount(g)),
+         # Update subtitle to reflect threshold
+         subtitle = sprintf("Nodes: %d | Edges: %d (Filter: |rho| > %.2f)", 
+                            vcount(g), ecount(g), min_cor),
          edge_color = "Association") +
     theme_void() +
     theme(

@@ -57,6 +57,8 @@ message(sprintf("   -> Topology metrics saved to: %s", topo_file))
 # ------------------------------------------------------------------------------
 message("[Viz] Generating network plots...")
 
+viz_thresh <- if (!is.null(config$viz$min_edge_weight)) config$viz$min_edge_weight else 0
+
 pdf_path <- file.path(out_dir, "Network_Structures.pdf")
 pdf(pdf_path, width = 10, height = 8)
 
@@ -65,7 +67,8 @@ if (sum(res_ctrl$adj) > 0) {
   p_ctrl <- plot_network_structure(
     res_ctrl$adj, 
     res_ctrl$weights, 
-    title = paste("Control Network:", config$control_group)
+    title = paste("Control Network:", config$control_group),
+    min_cor = viz_thresh
   )
   print(p_ctrl)
 } else {
@@ -78,7 +81,8 @@ if (sum(res_case$adj) > 0) {
   p_case <- plot_network_structure(
     res_case$adj, 
     res_case$weights, 
-    title = paste("Case Network:", paste(config$case_groups, collapse="+"))
+    title = paste("Case Network:", paste(config$case_groups, collapse="+")),
+    min_cor = viz_thresh
   )
   print(p_case)
 } else {
