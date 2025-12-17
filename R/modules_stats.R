@@ -9,6 +9,91 @@ library(corpcor)
 library(dplyr)
 library(foreach)
 
+#' @title Assess MANOVA Assumptions
+#' @description 
+#' Checks Multivariate Normality (via Mahalanobis QQ) and 
+#' Homogeneity of Multivariate Dispersion (via Betadisper).
+#' 
+#' @param ilr_data Dataframe with metadata and ILR coordinates.
+#' @param group_col String name of the grouping column.
+#' @param metadata_cols Vector of metadata column names to exclude.
+#' @return A list containing statistical test results and metrics.
+check_manova_assumptions <- function(ilr_data, group_col = "Group", metadata_cols = c("Patient_ID", "Group")) {
+  
+  requireNamespace("vegan", quietly = TRUE)
+  
+  # 1. Prepare Data
+  ilr_mat <- as.matrix(ilr_data[, !names(ilr_data) %in% metadata_cols])
+  groups <- as.factor(ilr_data[[group_col]])
+  
+  results <- list()
+  
+  # 2. Multivariate Normality (Proxy via Mahalanobis Distance)
+  # Theoretical quantiles vs Squared Mahalanobis distances
+  # If data is MVN, squared Mahalanobis distances follow Chi-Square(df = n_features)
+  
+  mu <- colMeans(ilr_mat)
+  cov_mat <- cov(ilr_mat)
+  
+  # Handle singular covariance (n < p) using generalized inverse if needed
+  # But for Mahalanobis, we usually need n > p. If n < p, we skip strict MVN test.
+  if(nrow(ilr_mat) > ncol(ilr_mat)) {
+    d2 <- mahalanobis(ilr_mat, mu, cov_mat)
+    
+    # Shapiro test on the Mahalanobis distances (Are they Chi-Sq distributed?)
+    # Note: This is an approximation. 
+    # Technically, we test if d2 follows Chi-sq. A simple proxy is correlation.
+    results$mahalanobis_dist <- d2
+    results$mvn_proxy_cor <- cor(sort(d2), qchisq(ppoints(nrow(ilr_mat)), df = ncol(ilr_mat)))
+  } else {
+    results$mahalanobis_dist <- NULL
+    results$mvn_proxy_cor <- NA
+    warning("[Stats] N < P detected. Skipping strict Mahalanobis-based MVN check.")
+  }
+  
+  # 3. Homogeneity of Multivariate Dispersions (PERMDISP)
+  # This is the robust alternative to Box's M
+  # Measures distance of each point to its group centroid
+  dist_mat <- dist(ilr_mat, method = "euclidean")
+  mod_disp <- vegan::betadisper(dist_mat, groups)
+  
+  # ANOVA on the dispersions (Do groups have different "tightness"?)
+  test_disp <- anova(mod_disp)
+  
+  results$homogeneity_pval <- test_disp$`Pr(>F)`[1]
+  results$dispersions <- mod_disp$distances
+  results$groups <- groups
+  
+  return(results)
+}
+
+#' @title Run PERMANOVA (Robust Alternative)
+#' @description 
+#' Performs Permutational Multivariate Analysis of Variance (adonis2).
+#' Valid when Normality assumptions are violated.
+#' 
+#' @param ilr_data Dataframe with metadata and ILR coordinates.
+#' @param group_col Grouping column.
+#' @param n_perm Number of permutations.
+#' @return A list with the adonis table and p-value.
+run_coda_permanova <- function(ilr_data, group_col = "Group", n_perm = 999) {
+  requireNamespace("vegan", quietly = TRUE)
+  
+  # Prepare formula
+  # We construct the formula dynamically: ilr_mat ~ Group
+  metadata_cols <- c("Patient_ID", group_col)
+  ilr_mat <- as.matrix(ilr_data[, !names(ilr_data) %in% metadata_cols])
+  groups <- ilr_data[[group_col]]
+  
+  message(sprintf("   [Stats] Running PERMANOVA (adonis2) with %d permutations...", n_perm))
+  
+  # Run adonis2 (Euclidean on ILR = Aitchison on Simplex)
+  # by="margin" tests marginal effects (Type III SS equivalent)
+  res_adonis <- vegan::adonis2(ilr_mat ~ groups, method = "euclidean", permutations = n_perm)
+  
+  return(res_adonis)
+}
+
 #' @title Run CoDa MANOVA (Multivariate Analysis of Variance)
 #' @description 
 #' Performs MANOVA on ILR-transformed data to test global group differences.
@@ -75,6 +160,7 @@ run_coda_manova <- function(ilr_data, clr_data, metadata_cols = c("Patient_ID", 
     loadings = loadings_df # This is the new part
   ))
 }
+
 #' @title Convert Precision Matrix to Partial Correlation
 #' @description 
 #' standardizes the precision matrix (inverse covariance) to partial correlations.

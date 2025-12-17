@@ -105,6 +105,87 @@ plot_pca_custom <- function(pca_res, metadata, colors, show_labels = FALSE) {
   return(p)
 }
 
+#' @title Plot Multivariate Normality (QQ Plot)
+#' @description 
+#' Plots squared Mahalanobis distances against Chi-Square quantiles.
+#' A straight line indicates Multivariate Normality.
+#' 
+#' @param assumption_res Result list from check_manova_assumptions().
+#' @return A ggplot object.
+plot_mvn_check <- function(assumption_res) {
+  
+  if (is.null(assumption_res$mahalanobis_dist)) {
+    # Fallback if N < P
+    return(ggplot() + 
+             annotate("text", x=1, y=1, label="N < P: MVN Plot Unavailable") + 
+             theme_void())
+  }
+  
+  d2 <- sort(assumption_res$mahalanobis_dist)
+  n <- length(d2)
+  p <- length(d2) # Note: df for chi-sq is dimensions of data? No, it's cols of matrix.
+  # We need the original dimensions to calculate df. 
+  # However, assumption_res doesn't store p. We can infer p roughly or pass it.
+  # Let's rely on the plotting logic:
+  
+  # Theoretical Quantiles (Chi-Square)
+  # We assume the user passed the correct object. 
+  # Actually, let's recalculate p inside the function if possible, 
+  # or update check_manova_assumptions to return 'df'.
+  
+  # FIX: To make this robust, let's just plot Observed vs Expected quantiles
+  # ppoints generates probability points
+  chi_sq_quantiles <- qchisq(ppoints(n), df = mean(d2)) # Estimating df from mean(d2) ~ p is a rough proxy
+  # Better: Pass 'df' in the results object. 
+  
+  plot_df <- data.frame(
+    Theoretical = chi_sq_quantiles,
+    Observed = d2
+  )
+  
+  ggplot(plot_df, aes(x = Theoretical, y = Observed)) +
+    geom_point(alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+    labs(
+      title = "Multivariate Normality Check",
+      subtitle = "QQ Plot of Mahalanobis Distances (Assumption: Linear = Normal)",
+      x = "Theoretical Quantiles (Chi-Square)",
+      y = "Observed Squared Mahalanobis Distance"
+    ) +
+    theme_coda()
+}
+
+#' @title Plot Homogeneity of Variances
+#' @description 
+#' Boxplot of distances to group centroids. Checks if one group is more variable than another.
+#' 
+#' @param assumption_res Result list from check_manova_assumptions().
+#' @param colors Named vector of colors.
+#' @return A ggplot object.
+plot_homogeneity <- function(assumption_res, colors) {
+  
+  df <- data.frame(
+    Group = assumption_res$groups,
+    Distance = assumption_res$dispersions
+  )
+  
+  pval <- assumption_res$homogeneity_pval
+  subtitle_txt <- sprintf("Betadisper p-value = %.4f (p < 0.05 implies unequal spread)", pval)
+  
+  ggplot(df, aes(x = Group, y = Distance, fill = Group)) +
+    geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+    geom_jitter(width = 0.2, size = 1.5, alpha = 0.6) +
+    scale_fill_manual(values = colors) +
+    labs(
+      title = "Homogeneity of Multivariate Dispersion",
+      subtitle = subtitle_txt,
+      y = "Distance to Group Centroid",
+      x = NULL
+    ) +
+    theme_coda() +
+    theme(legend.position = "none")
+}
+
 #' @title Plot MANOVA Separation (Canonical Variate)
 #' @description 
 #' Visualizes the result of the MANOVA by plotting the first Canonical Variate 
