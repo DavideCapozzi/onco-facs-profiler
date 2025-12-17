@@ -28,7 +28,7 @@ rownames(mat_raw) <- raw_data$Patient_ID
 
 message(sprintf("[Data] Initial Matrix: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
-# --- Marker Whitelist/Blacklist (Business Logic) ---
+# --- Marker Whitelist/Blacklist ---
 initial_markers <- colnames(mat_raw)
 target_markers  <- initial_markers
 
