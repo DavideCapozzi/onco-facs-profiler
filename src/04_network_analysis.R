@@ -10,9 +10,10 @@ suppressPackageStartupMessages({
   library(ggraph)
 })
 
-source("R/infrastructure.R")
-source("R/modules_stats.R") # For topology & format_cytoscape
-source("R/modules_viz.R")   # For plot_network_structure
+# UPDATED IMPORTS
+source("R/utils_io.R")          
+source("R/modules_network.R")   
+source("R/modules_viz.R")       
 
 message("\n=== PIPELINE STEP 4: NETWORK ANALYSIS & EXPORT ===")
 
@@ -34,6 +35,7 @@ if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 # ------------------------------------------------------------------------------
 message("[Analysis] Calculating topology metrics...")
 
+# Function name get_topology_metrics is unchanged in modules_network.R
 topo_ctrl <- get_topology_metrics(res_ctrl$adj, res_ctrl$weights)
 topo_case <- get_topology_metrics(res_case$adj, res_case$weights)
 
@@ -100,16 +102,15 @@ message("[Export] Generating Cytoscape input files...")
 cyto_dir <- file.path(out_dir, "cytoscape_inputs")
 if (!dir.exists(cyto_dir)) dir.create(cyto_dir, recursive = TRUE)
 
-# Format Edges
-edges_ctrl <- format_cytoscape_edges(res_ctrl$adj, res_ctrl$weights)
-edges_case <- format_cytoscape_edges(res_case$adj, res_case$weights)
+# Format Edges - UPDATED FUNCTION NAME
+edges_ctrl <- export_cytoscape_edges(res_ctrl$adj, res_ctrl$weights)
+edges_case <- export_cytoscape_edges(res_case$adj, res_case$weights)
 
 # Write to CSV
 write.csv(edges_ctrl, file.path(cyto_dir, "edges_control.csv"), row.names = FALSE)
 write.csv(edges_case, file.path(cyto_dir, "edges_case.csv"), row.names = FALSE)
 
-# Also create a Node Attributes file (from topology)
-# This allows you to color/size nodes in Cytoscape by Degree/Betweenness calculated here
+# Also create a Node Attributes file
 if(!is.null(topo_ctrl)) {
   write.csv(topo_ctrl, file.path(cyto_dir, "nodes_attributes_control.csv"), row.names = FALSE)
 }

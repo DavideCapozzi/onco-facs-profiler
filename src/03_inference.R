@@ -11,8 +11,9 @@ suppressPackageStartupMessages({
   library(corpcor)
 })
 
-source("R/infrastructure.R")
-source("R/modules_stats.R")
+# UPDATED IMPORTS
+source("R/utils_io.R")          
+source("R/modules_network.R")   
 
 message("\n=== PIPELINE STEP 3: ROBUST NETWORK INFERENCE ===")
 
@@ -52,12 +53,11 @@ message(sprintf("[System] Initializing Cluster with %d cores...", n_cores_req))
 cl <- makeCluster(n_cores_req)
 registerDoParallel(cl)
 
-# --- FIX: EXPORT CUSTOM FUNCTIONS TO WORKERS ---
-# Workers start with an empty environment. We must export our custom logic.
-# We export the bootstrap wrapper AND the estimation functions it depends on.
-clusterExport(cl, varlist = c("run_single_bootstrap", 
-                              "estimate_pcor_robust", 
-                              "prec2part"), 
+# --- CRITICAL UPDATE: EXPORT NEW FUNCTION NAMES ---
+# We export the new function names defined in modules_network.R
+# Note: 'prec2part' is no longer needed if it was inlined into infer_network_pcor
+clusterExport(cl, varlist = c("boot_worker_pcor", 
+                              "infer_network_pcor"), 
               envir = .GlobalEnv)
 
 # Also load necessary libraries on workers
@@ -74,9 +74,9 @@ run_parallel_bootstrap <- function(data_mat, n_boot, seed_val) {
   # Set RNG Stream for reproducibility
   parallel::clusterSetRNGStream(cl, seed_val)
   
-  # Run Loop
+  # Run Loop using NEW Worker Name
   res_list <- foreach(i = 1:n_boot, .packages = c("corpcor")) %dopar% {
-    run_single_bootstrap(data_mat, n_samples)
+    boot_worker_pcor(data_mat, n_samples)
   }
   
   return(res_list)
@@ -90,7 +90,7 @@ message("\n[Inference] 2. Running Bootstrap for Case Group...")
 boot_case_raw <- run_parallel_bootstrap(mat_case, config$stats$n_boot, config$stats$seed + 1000)
 res_case <- aggregate_boot_results(boot_case_raw, alpha = config$stats$alpha)
 
-# --- CHANGED: Detailed Bootstrap Logging ---
+# Logging
 n_possible <- (ncol(mat_ctrl) * (ncol(mat_ctrl) - 1)) / 2
 n_edge_ctrl <- sum(res_ctrl$adj)/2
 n_edge_case <- sum(res_case$adj)/2
@@ -109,8 +109,9 @@ n1 <- nrow(mat_ctrl)
 n2 <- nrow(mat_case)
 pool_mat <- rbind(mat_ctrl, mat_case)
 
-obs_pcor_ctrl <- estimate_pcor_robust(mat_ctrl)
-obs_pcor_case <- estimate_pcor_robust(mat_case)
+# UPDATED FUNCTION NAME: infer_network_pcor
+obs_pcor_ctrl <- infer_network_pcor(mat_ctrl)
+obs_pcor_case <- infer_network_pcor(mat_case)
 obs_diff_mat  <- abs(obs_pcor_ctrl - obs_pcor_case)
 
 # Set seed for permutation
@@ -122,9 +123,9 @@ null_diffs <- foreach(i = 1:n_perm, .combine = 'c', .packages = "corpcor") %dopa
   p1 <- pool_mat[shuffled_idx[1:n1], ]
   p2 <- pool_mat[shuffled_idx[(n1 + 1):(n1 + n2)], ]
   
-  # Estimate (Workers already have 'estimate_pcor_robust' from the export above)
-  r1 <- estimate_pcor_robust(p1)
-  r2 <- estimate_pcor_robust(p2)
+  # Estimate using NEW Function Name
+  r1 <- infer_network_pcor(p1)
+  r2 <- infer_network_pcor(p2)
   
   list(abs(r1 - r2))
 }

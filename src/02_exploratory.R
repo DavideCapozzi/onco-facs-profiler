@@ -8,12 +8,12 @@ suppressPackageStartupMessages({
   library(FactoMineR)
   library(factoextra)
   library(openxlsx)
-  library(vegan) # Essential for robust testing
+  library(vegan)
 })
 
 # Source modules
-source("R/infrastructure.R")
-source("R/modules_stats.R")
+source("R/utils_io.R")          
+source("R/modules_hypothesis.R") 
 source("R/modules_viz.R")
 
 
@@ -31,7 +31,6 @@ df_ilr <- DATA$ilr_data
 markers <- DATA$markers
 my_colors <- get_palette(config)
 
-# 2. Prepare Output Directory
 out_dir <- file.path(config$output_root, "02_exploratory")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
@@ -55,14 +54,13 @@ ggsave(file.path(out_dir, "PCA_Scree_Plot.pdf"), p_scree, width = 6, height = 4)
 p_vars <- plot_pca_variables(res_pca)
 ggsave(file.path(out_dir, "PCA_Variable_Contrib.pdf"), p_vars, width = 8, height = 6)
 
-
 # ==============================================================================
 # PART B: STATISTICAL ASSUMPTION CHECKING
 # ==============================================================================
 message("[Stats] Checking MANOVA Assumptions on ILR Data...")
-# We use ILR because it is Euclidean and mathematically proper for these tests.
 
-check_res <- check_manova_assumptions(df_ilr, group_col = "Group", metadata_cols = c("Patient_ID", "Group"))
+# UPDATED FUNCTION NAME: assess_manova_assumptions
+check_res <- assess_manova_assumptions(df_ilr, group_col = "Group", metadata_cols = c("Patient_ID", "Group"))
 
 # 1. Viz: Homogeneity
 p_homog <- plot_homogeneity(check_res, my_colors)
@@ -78,37 +76,32 @@ message(sprintf("   -> Homogeneity of Dispersion: p = %.4f [%s]",
                 check_res$homogeneity_pval, 
                 ifelse(is_homog_ok, "PASS", "FAIL - Groups have different spread")))
 
-if (!is_homog_ok) {
-  warning("[Stats] Homogeneity assumption violated. Standard MANOVA results may be unreliable (high Type I error).")
-  warning("[Stats] Proceeding with Robust PERMANOVA.")
-}
-
 # ==============================================================================
 # PART C: HYPOTHESIS TESTING (MANOVA vs PERMANOVA)
 # ==============================================================================
 
-# 1. Standard MANOVA (Pillai's Trace - most robust parametric option)
+# 1. Standard MANOVA 
 message("[Stats] Running Parametric MANOVA (Pillai)...")
-manova_results <- run_coda_manova(df_ilr, df_clr, metadata_cols = c("Patient_ID", "Group"))
+# UPDATED FUNCTION NAME: test_coda_manova
+manova_results <- test_coda_manova(df_ilr, df_clr, metadata_cols = c("Patient_ID", "Group"))
 
-# 2. Robust PERMANOVA (Distance-based, Non-parametric)
+# 2. Robust PERMANOVA
 message("[Stats] Running Robust PERMANOVA (adonis2)...")
-permanova_res <- run_coda_permanova(df_ilr, group_col = "Group", n_perm = config$stats$n_perm)
+# UPDATED FUNCTION NAME: test_coda_permanova
+permanova_res <- test_coda_permanova(df_ilr, group_col = "Group", n_perm = config$stats$n_perm)
 
-# Extract PERMANOVA stats
 perm_pval <- permanova_res$`Pr(>F)`[1]
 perm_r2   <- permanova_res$R2[1]
 
 message(sprintf("   -> MANOVA (Parametric): p = %.5f", manova_results$p_value))
 message(sprintf("   -> PERMANOVA (Robust):  p = %.5f (R2 = %.2f%%)", perm_pval, perm_r2 * 100))
 
-# 3. Visualization of Separation
+# 3. Visualization
 p_manova <- plot_manova_results(manova_results, my_colors) +
   labs(subtitle = sprintf("MANOVA p=%.4f | PERMANOVA p=%.4f (R2=%.1f%%)", 
                           manova_results$p_value, perm_pval, perm_r2*100))
 ggsave(file.path(out_dir, "Global_Separation_Boxplot.pdf"), p_manova, width = 6, height = 5)
 
-# Loadings
 p_loadings <- plot_manova_loadings(manova_results, top_n = 20)
 ggsave(file.path(out_dir, "Separation_Drivers_Lollipop.pdf"), p_loadings, width = 7, height = 6)
 
@@ -119,7 +112,6 @@ ggsave(file.path(out_dir, "Separation_Drivers_Lollipop.pdf"), p_loadings, width 
 
 wb <- createWorkbook()
 
-# Sheet 1: Assumptions
 addWorksheet(wb, "Assumptions")
 assumption_df <- data.frame(
   Test = c("Homogeneity of Dispersion (Betadisper)"),
@@ -128,15 +120,12 @@ assumption_df <- data.frame(
 )
 writeData(wb, "Assumptions", assumption_df)
 
-# Sheet 2: MANOVA
 addWorksheet(wb, "MANOVA_Parametric")
 writeData(wb, "MANOVA_Parametric", as.data.frame(manova_results$summary), rowNames = TRUE)
 
-# Sheet 3: PERMANOVA
 addWorksheet(wb, "PERMANOVA_Robust")
 writeData(wb, "PERMANOVA_Robust", as.data.frame(permanova_res), rowNames = TRUE)
 
-# Sheet 4: Loadings
 addWorksheet(wb, "Marker_Loadings")
 writeData(wb, "Marker_Loadings", manova_results$loadings)
 
