@@ -42,12 +42,12 @@ colors:
   HNSCC: "#CD5C5C"    # IndianRed
 
 viz:
-  min_edge_weight: 0.15 # Edges with absolute partial correlation < 0.20 will be hidden
+  min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
 
 # --- Quality Control ---
 qc:
-  max_na_row_pct: 0.55  # Drop patients with >55% NA
-  max_na_col_pct: 0.20  # Drop markers with >20% NA
+  max_na_row_pct: 0.55  # Drop patients with NA percentage higher than this  
+  max_na_col_pct: 0.20  # Drop markerswith NA percentage higher than this  
 
 # --- Imputation (CoDa) ---
 imputation:
