@@ -35,6 +35,11 @@ marker_selection:
   whitelist: []      
   blacklist: [] #["PD1", "PD1CD4", "PD1CD8", "CD137CD8", "CD137PD1", "CD8"]       
 
+  
+hybrid_groups:
+  Differentiation: ["CM", "EFF", "EM", "NAIVE"]
+  Lineage: ["CD4", "CD8"]  
+
 # --- Visuals ---
 colors:
   Healthy: "#2E8B57"  # SeaGreen
