@@ -17,7 +17,6 @@ message("\n=== PIPELINE STEP 1: INGESTION & HYBRID TRANSFORM ===")
 # 1. Load Config & Data
 config <- load_config("config/global_params.yml")
 
-# CHECK DI SICUREZZA: Verifica che hybrid_groups esista
 if (is.null(config$hybrid_groups)) {
   stop("[FATAL] 'hybrid_groups' not found in config. Please update global_params.yml.")
 }
@@ -108,46 +107,44 @@ if (length(unassigned_markers) > 0) {
   transformed_list[["Functional"]] <- mat_trans
 }
 
-# D. Reconstruct & Z-Score (Normalization)
+# D. Reconstruct & Normalization
+# ------------------------------------------------------------------------------
 # 1. Merge pieces
-mat_hybrid_raw <- do.call(cbind, transformed_list)
+mat_hybrid_tmp <- do.call(cbind, transformed_list)
 
-# 2. Clean column names (Remove "Group." prefix)
-colnames(mat_hybrid_raw) <- sub("^[^.]+\\.", "", colnames(mat_hybrid_raw))
-mat_hybrid_raw <- mat_hybrid_raw[, sort(colnames(mat_hybrid_raw)), drop = FALSE]
+# 2. Clean column names (Remove "Group." prefix if added by list binding)
+colnames(mat_hybrid_tmp) <- sub("^[^.]+\\.", "", colnames(mat_hybrid_tmp))
+mat_hybrid_tmp <- mat_hybrid_tmp[, sort(colnames(mat_hybrid_tmp)), drop = FALSE]
 
-# 3. APPLY Z-SCORE (Standardization)
-# Questo rende comparabili le colonne CLR (somma 0) e Log1p (positive)
+# 3. Save RAW Hybrid (Transformed but NOT Z-scored) - Useful for univariate tests
+mat_hybrid_raw <- mat_hybrid_tmp
+
+# 4. Save Z-SCORED Hybrid - Useful for PCA, Heatmaps, Networks
 message("   [Norm] Applying Z-Score Standardization to Hybrid Matrix...")
 mat_hybrid_z <- scale(mat_hybrid_raw)
-# Rimuovi attributi "scaled:center" e "scaled:scale" per pulizia
 mat_hybrid_z <- matrix(as.numeric(mat_hybrid_z), 
                        nrow = nrow(mat_hybrid_z), 
                        dimnames = dimnames(mat_hybrid_z))
 
 # E. Compute Local ILR (For Statistical Inference only)
-# Calcoliamo ora le coordinate ILR specifiche per i gruppi composizionali
 ilr_list <- coda_compute_local_ilr(mat_imputed, config$hybrid_groups)
 
 
 # 5. Save Output
 # ------------------------------------------------------------------------------
-# Creiamo dataframes completi con metadati per l'export
-df_hybrid_z <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_z))
+# We save both versions of the matrix for downstream flexibility
+df_hybrid_raw <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_raw))
+df_hybrid_z   <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_z))
 
 processed_data <- list(
-  metadata       = raw_data[, meta_cols],
-  markers        = colnames(mat_raw),      
-  raw_matrix     = mat_raw,
-  imputed_data   = cbind(raw_data[, meta_cols], as.data.frame(mat_imputed)),
-  
-  # MAIN ANALYTICAL MATRIX (Hybrid + Z-scored -> Use for PCA, Heatmap, Networks)
-  hybrid_data_z  = df_hybrid_z,   
-  
-  # COMPOSITIONAL STATS (List of ILR matrices -> Use for MANOVA on specific groups)
-  ilr_balances   = ilr_list,
-  
-  config         = config
+  metadata        = raw_data[, meta_cols],
+  markers         = colnames(mat_raw),      
+  raw_matrix      = mat_raw,
+  imputed_data    = cbind(raw_data[, meta_cols], as.data.frame(mat_imputed)),
+  hybrid_data_raw = df_hybrid_raw,  # Transformed (CLR/Log), NO Z-score
+  hybrid_data_z   = df_hybrid_z,    # Transformed AND Z-scored
+  ilr_balances    = ilr_list,
+  config          = config
 )
 
 saveRDS(processed_data, file.path(out_dir, "data_processed.rds"))

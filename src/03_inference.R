@@ -11,7 +11,7 @@ suppressPackageStartupMessages({
   library(corpcor)
 })
 
-# UPDATED IMPORTS
+# Imports
 source("R/utils_io.R")          
 source("R/modules_network.R")   
 
@@ -24,14 +24,22 @@ input_file <- file.path(config$output_root, "01_QC", "data_processed.rds")
 if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.R first.")
 
 DATA <- readRDS(input_file)
-df_clr <- DATA$clr_data 
-markers <- DATA$markers
+
+# --- FIX: Load the correct Hybrid Z-Scored Matrix ---
+# We use Z-scored data for networks to ensure numerical stability during shrinkage
+df_input <- DATA$hybrid_data_z 
+
+# Extract marker names dynamically from the dataframe columns
+# This avoids mismatches if column names were cleaned in Step 1
+meta_cols <- c("Patient_ID", "Group")
+markers   <- setdiff(colnames(df_input), meta_cols)
 
 # 2. Prepare Data Subsets
 grp_ctrl <- config$control_group
 grp_case <- config$case_groups
 
 get_group_matrix <- function(df, group_names, features) {
+  # Ensure we select only rows matching the group and columns matching markers
   mat <- df %>% 
     filter(Group %in% group_names) %>% 
     select(all_of(features)) %>% 
@@ -39,8 +47,8 @@ get_group_matrix <- function(df, group_names, features) {
   return(mat)
 }
 
-mat_ctrl <- get_group_matrix(df_clr, grp_ctrl, markers)
-mat_case <- get_group_matrix(df_clr, grp_case, markers)
+mat_ctrl <- get_group_matrix(df_input, grp_ctrl, markers)
+mat_case <- get_group_matrix(df_input, grp_case, markers)
 
 message(sprintf("[Data] Control Group (%s): %d samples", grp_ctrl, nrow(mat_ctrl)))
 message(sprintf("[Data] Case Group (%s): %d samples", paste(grp_case, collapse="+"), nrow(mat_case)))
@@ -53,14 +61,11 @@ message(sprintf("[System] Initializing Cluster with %d cores...", n_cores_req))
 cl <- makeCluster(n_cores_req)
 registerDoParallel(cl)
 
-# --- CRITICAL UPDATE: EXPORT NEW FUNCTION NAMES ---
-# We export the new function names defined in modules_network.R
-# Note: 'prec2part' is no longer needed if it was inlined into infer_network_pcor
+# Export functions and libraries to workers
 clusterExport(cl, varlist = c("boot_worker_pcor", 
                               "infer_network_pcor"), 
               envir = .GlobalEnv)
 
-# Also load necessary libraries on workers
 clusterEvalQ(cl, {
   library(corpcor)
   library(dplyr)
@@ -74,7 +79,6 @@ run_parallel_bootstrap <- function(data_mat, n_boot, seed_val) {
   # Set RNG Stream for reproducibility
   parallel::clusterSetRNGStream(cl, seed_val)
   
-  # Run Loop using NEW Worker Name
   res_list <- foreach(i = 1:n_boot, .packages = c("corpcor")) %dopar% {
     boot_worker_pcor(data_mat, n_samples)
   }
@@ -109,7 +113,7 @@ n1 <- nrow(mat_ctrl)
 n2 <- nrow(mat_case)
 pool_mat <- rbind(mat_ctrl, mat_case)
 
-# UPDATED FUNCTION NAME: infer_network_pcor
+# Calculate Observed Differences
 obs_pcor_ctrl <- infer_network_pcor(mat_ctrl)
 obs_pcor_case <- infer_network_pcor(mat_case)
 obs_diff_mat  <- abs(obs_pcor_ctrl - obs_pcor_case)
@@ -118,15 +122,16 @@ obs_diff_mat  <- abs(obs_pcor_ctrl - obs_pcor_case)
 clusterSetRNGStream(cl, config$stats$seed + 2000)
 
 null_diffs <- foreach(i = 1:n_perm, .combine = 'c', .packages = "corpcor") %dopar% {
-  # Shuffle
+  # Shuffle labels
   shuffled_idx <- sample(1:(n1 + n2))
   p1 <- pool_mat[shuffled_idx[1:n1], ]
   p2 <- pool_mat[shuffled_idx[(n1 + 1):(n1 + n2)], ]
   
-  # Estimate using NEW Function Name
+  # Re-estimate networks
   r1 <- infer_network_pcor(p1)
   r2 <- infer_network_pcor(p2)
   
+  # Return vector of absolute differences
   list(abs(r1 - r2))
 }
 
@@ -164,6 +169,7 @@ if(nrow(edges_indices) > 0) {
     obs_val <- obs_diff_mat[i, j]
     null_vals <- sapply(null_diffs, function(m) m[i, j])
     
+    # P-value: Proportion of null stats >= observed stat
     p_val <- (sum(null_vals >= obs_val) + 1) / denom_p
     
     results_table <- rbind(results_table, data.frame(
