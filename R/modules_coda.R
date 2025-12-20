@@ -119,17 +119,49 @@ coda_transform_clr <- function(mat) {
   return(clr_mat)
 }
 
-#' @title Isometric Log-Ratio Transformation (ILR)
-#' @description Transforms data into D-1 orthogonal coordinates for MANOVA.
-transform_ilr <- function(mat) {
+#' @title Compute Local ILR for Compositional Subgroups
+#' @description 
+#' Iterates through defined groups in config. If a group has >1 marker, 
+#' it treats it as a sub-composition and calculates Isometric Log-Ratio coordinates.
+#' 
+#' @param mat_imputed A matrix of imputed counts/concentrations (strictly positive).
+#' @param hybrid_groups A list from config defining marker groups.
+#' @return A named list of matrices, where each matrix contains ILR coordinates for a group.
+coda_compute_local_ilr <- function(mat_imputed, hybrid_groups) {
   
-  if (any(mat <= 0, na.rm = TRUE)) stop("ILR input must be strictly positive.")
+  if (any(mat_imputed <= 0, na.rm = TRUE)) stop("ILR input must be strictly positive.")
   
-  message("   [CoDa] Applying ILR transformation (D-1 coordinates)...")
+  ilr_results <- list()
   
-  ilr_obj <- compositions::ilr(compositions::acomp(mat))
-  ilr_mat <- as.matrix(ilr_obj)
-  rownames(ilr_mat) <- rownames(mat)
+  message("   [CoDa] Computing Local ILR balances for sub-compositions...")
   
-  return(ilr_mat)
+  for (group_name in names(hybrid_groups)) {
+    target_mks <- hybrid_groups[[group_name]]
+    present_mks <- intersect(target_mks, colnames(mat_imputed))
+    
+    # Check 1: Markers must exist
+    if (length(present_mks) == 0) next
+    
+    # Check 2: Must have at least 2 markers for ILR (D parts -> D-1 balances)
+    if (length(present_mks) < 2) {
+      # message(sprintf("      -> Skip '%s': < 2 markers (cannot calculate balances).", group_name))
+      next
+    }
+    
+    # Subset and Closure (acomp does closure automatically)
+    mat_sub <- mat_imputed[, present_mks, drop = FALSE]
+    
+    # Calculate ILR (default basis)
+    # Note: Column names will be V1, V2... Interpretability requires looking at the basis.
+    ilr_obj <- compositions::ilr(compositions::acomp(mat_sub))
+    ilr_mat <- as.matrix(ilr_obj)
+    
+    # Preserve Rownames
+    rownames(ilr_mat) <- rownames(mat_imputed)
+    
+    ilr_results[[group_name]] <- ilr_mat
+    message(sprintf("      -> '%s': Computed %d ILR balances.", group_name, ncol(ilr_mat)))
+  }
+  
+  return(ilr_results)
 }
