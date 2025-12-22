@@ -2,34 +2,34 @@
 # PROJECT CONFIGURATION: CLR Network Inference
 # ==============================================================================
 
-#project_name: "longsurvivors"
-project_name: "immunerange"
+project_name: "longsurvivors"
+#project_name: "immunerange"
 
 # --- File Paths ---
 # Use absolute paths or relative to project root
-#input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
-input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
+input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
+#input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
 
 output_root: "results"
 
-# # --- Groups & Cohorts ---
+# --- Groups & Cohorts ---
+cohorts:
+  NSCLC: "NSCLC"
+  HNSCC: "HNSCC"
+  Healthy: "Healthy_Donors"
+
+# Analysis Groupings
+control_group: "Healthy"
+case_groups: ["NSCLC", "HNSCC"]
+
+# # cohorts:
 # cohorts:
-#   NSCLC: "NSCLC"
-#   HNSCC: "HNSCC"
-#   Healthy: "Healthy_Donors"
+#   DS_Duraclone: "DS_Duraclone"
+#   Healthy: "DS_Chiara"
 
 # # Analysis Groupings
 # control_group: "Healthy"
-# case_groups: ["NSCLC", "HNSCC"]
-
-# cohorts:
-cohorts:
-  DS_Duraclone: "DS_Duraclone"
-  Healthy: "DS_Chiara"
-
-# Analysis Groupings
-control_group: "DS_Chiara"
-case_groups: [DS_Duraclone]
+# case_groups: ["DS_Duraclone"]
 
 marker_selection:
   whitelist: []      
@@ -39,12 +39,14 @@ marker_selection:
 hybrid_groups:
   Differentiation: ["CM", "EFF", "EM", "NAIVE"]
   Lineage: ["CD4", "CD8"]  
+  
 
 # --- Visuals ---
 colors:
   Healthy: "#2E8B57"  # SeaGreen
   NSCLC: "#4682B4"    # SteelBlue
   HNSCC: "#CD5C5C"    # IndianRed
+  DS_Duraclone: "#4682B4" 
 
 viz:
   min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
