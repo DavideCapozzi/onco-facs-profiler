@@ -56,22 +56,61 @@ message("[PCA] Running PCA on Global Z-Scored Matrix...")
 pca_input <- df_global %>% select(-all_of(meta_cols)) %>% as.matrix()
 
 # Run PCA (FactoMineR)
-# scale.unit = FALSE perché i dati sono già Z-scored, ma TRUE non fa danni (1/1=1)
 res_pca <- PCA(pca_input, scale.unit = FALSE, graph = FALSE)
 
-# Plotting
-p_pca <- plot_pca_custom(res_pca, df_global, my_colors, show_labels = FALSE) # Set TRUE if few samples
-ggsave(file.path(out_dir, "PCA_Global_Score.pdf"), p_pca, width = 8, height = 6)
+# --- 1. INDIVIDUALS PCA PLOT ---
+message("[PCA] Saving Individuals plots to single PDF...")
 
+pdf_ind_path <- file.path(out_dir, "PCA_Global_Individuals_MultiPage.pdf")
+pdf(pdf_ind_path, width = 8, height = 6)
+
+# Configurazione Label
+SHOW_LABELS_PCA <- TRUE 
+
+# Page 1: PC1 vs PC2
+print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 2), show_labels = SHOW_LABELS_PCA))
+
+# Page 2: PC1 vs PC3
+print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 3), show_labels = SHOW_LABELS_PCA))
+
+# Page 3: PC2 vs PC3
+print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(2, 3), show_labels = SHOW_LABELS_PCA))
+
+dev.off() 
+
+
+# --- 2. VARIABLES/LOADINGS PLOT  ---
+message("[PCA] Saving Variables/Loadings plots to single PDF...")
+
+pdf_var_path <- file.path(out_dir, "PCA_Global_Variables_MultiPage.pdf")
+pdf(pdf_var_path, width = 8, height = 6)
+
+plot_vars_dims <- function(pca_res, axes_vec) {
+  fviz_pca_var(pca_res, 
+               axes = axes_vec,
+               col.var = "contrib", 
+               gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+               repel = TRUE) + 
+    labs(title = sprintf("Variables - PCA (PC%d vs PC%d)", axes_vec[1], axes_vec[2])) +
+    theme_coda()
+}
+
+# Page 1: PC1 vs PC2
+print(plot_vars_dims(res_pca, c(1, 2)))
+
+# Page 2: PC1 vs PC3
+print(plot_vars_dims(res_pca, c(1, 3)))
+
+# Page 3: PC2 vs PC3
+print(plot_vars_dims(res_pca, c(2, 3)))
+
+dev.off()
+
+
+# --- 3. SCREE PLOT ---
 p_scree <- fviz_eig(res_pca, addlabels = TRUE, ylim = c(0, 50)) + 
   theme_minimal() + ggtitle("Scree Plot (Global)")
 ggsave(file.path(out_dir, "PCA_Global_Scree.pdf"), p_scree, width = 6, height = 4)
-
-p_vars <- fviz_pca_var(res_pca, col.var = "contrib", 
-                       gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
-                       repel = TRUE) + ggtitle("Variables Contribution")
-ggsave(file.path(out_dir, "PCA_Global_Variables.pdf"), p_vars, width = 8, height = 6)
-
 
 # ==============================================================================
 # PART B: STATISTICAL TESTING (PERMANOVA)

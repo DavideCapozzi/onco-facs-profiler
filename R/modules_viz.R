@@ -61,13 +61,20 @@ run_coda_pca <- function(data_matrix) {
 #' @param pca_res Result from run_coda_pca().
 #' @param metadata Dataframe containing 'Patient_ID' and 'Group'.
 #' @param colors Named vector of colors for groups.
+#' @param dims Integer vector of length 2 indicating which PCs to plot (e.g., c(1, 2)).
 #' @param show_labels Logical. If TRUE, adds Patient_ID labels.
 #' @return A ggplot object.
-plot_pca_custom <- function(pca_res, metadata, colors, show_labels = FALSE) {
+plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2), show_labels = FALSE) {
   
-  # 1. Extract Individual Coordinates
-  ind_coords <- as.data.frame(pca_res$ind$coord)
-  colnames(ind_coords)[1:2] <- c("Dim1", "Dim2")
+  # Validation for dimensions
+  if (length(dims) != 2) stop("dims parameter must be a vector of length 2 (e.g., c(1, 3))")
+  dim_x <- dims[1]
+  dim_y <- dims[2]
+  
+  # 1. Extract Individual Coordinates for chosen dimensions
+  # FactoMineR stores coords in columns named "Dim.1", "Dim.2", etc.
+  ind_coords <- as.data.frame(pca_res$ind$coord[, c(dim_x, dim_y)])
+  colnames(ind_coords) <- c("X_Coord", "Y_Coord")
   
   # Bind metadata (ensure order matches)
   if (nrow(ind_coords) != nrow(metadata)) stop("Metadata/PCA dimension mismatch.")
@@ -75,31 +82,31 @@ plot_pca_custom <- function(pca_res, metadata, colors, show_labels = FALSE) {
   
   # 2. Extract Variance Explained
   eig_val <- get_eigenvalue(pca_res)
-  var_d1 <- round(eig_val[1, 2], 1)
-  var_d2 <- round(eig_val[2, 2], 1)
+  var_x <- round(eig_val[dim_x, 2], 1)
+  var_y <- round(eig_val[dim_y, 2], 1)
   
   # 3. Base Plot (Individuals)
-  p <- ggplot(plot_data, aes(x = Dim1, y = Dim2, color = Group, fill = Group)) +
+  p <- ggplot(plot_data, aes(x = X_Coord, y = Y_Coord, color = Group, fill = Group)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "gray80") +
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray80") +
-    # Ellipses for groups
+    # Ellipses for groups (optional logic: needs enough points)
     stat_ellipse(geom = "polygon", alpha = 0.1, show.legend = FALSE, level = 0.95) +
     # Points
     geom_point(size = 3, alpha = 0.8, shape = 21, color = "white", stroke = 0.5) +
-    aes(fill = Group) + 
+    # aes(fill = Group) +  <-- Removed redundant aes call, handled in main aes
     scale_color_manual(values = colors) +
     scale_fill_manual(values = colors) +
     labs(
-      x = sprintf("PC1 (%s%%)", var_d1),
-      y = sprintf("PC2 (%s%%)", var_d2),
-      title = "PCA: Immunological Landscape (CLR Space)",
+      x = sprintf("PC%d (%s%%)", dim_x, var_x),
+      y = sprintf("PC%d (%s%%)", dim_y, var_y),
+      title = sprintf("PCA: Immunological Landscape (PC%d vs PC%d)", dim_x, dim_y),
       subtitle = "Euclidean distance on CLR = Aitchison distance on Raw"
     ) +
     theme_coda()
   
   # 4. Optional Labels
   if (show_labels) {
-    p <- p + geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE)
+    p <- p + geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE, max.overlaps = 20)
   }
   
   return(p)
