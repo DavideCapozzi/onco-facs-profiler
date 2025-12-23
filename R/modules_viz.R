@@ -56,62 +56,104 @@ run_coda_pca <- function(data_matrix) {
   return(res_pca)
 }
 
-#' @title Custom PCA Biplot
-#' @description Plots Individuals (dots) and Variables (arrows) in the same space.
+#' @title Custom PCA Biplot with Multi-Pattern Highlighting
+#' @description Plots Individuals with flexible highlighting based on metadata substrings.
 #' @param pca_res Result from run_coda_pca().
-#' @param metadata Dataframe containing 'Patient_ID' and 'Group'.
-#' @param colors Named vector of colors for groups.
-#' @param dims Integer vector of length 2 indicating which PCs to plot (e.g., c(1, 2)).
+#' @param metadata Dataframe containing 'Patient_ID', 'Group' and the subgroup column.
+#' @param colors Named vector of colors for main Groups (fill).
+#' @param dims Integer vector of length 2 indicating which PCs to plot.
 #' @param show_labels Logical. If TRUE, adds Patient_ID labels.
+#' @param highlight_patterns Named vector (Pattern -> Color). E.g., c("_LS" = "#FFD700").
+#' @param find_col_keyword Keyword to identify the metadata column to search.
 #' @return A ggplot object.
-plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2), show_labels = FALSE) {
+plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2), 
+                            show_labels = FALSE, 
+                            highlight_patterns = NULL,
+                            find_col_keyword = "Original|Source") {
   
-  # Validation for dimensions
-  if (length(dims) != 2) stop("dims parameter must be a vector of length 2 (e.g., c(1, 3))")
-  dim_x <- dims[1]
-  dim_y <- dims[2]
-  
-  # 1. Extract Individual Coordinates for chosen dimensions
-  # FactoMineR stores coords in columns named "Dim.1", "Dim.2", etc.
-  ind_coords <- as.data.frame(pca_res$ind$coord[, c(dim_x, dim_y)])
+  # 1. Setup Coordinates & Metadata
+  if (length(dims) != 2) stop("dims parameter must be a vector of length 2")
+  ind_coords <- as.data.frame(pca_res$ind$coord[, dims])
   colnames(ind_coords) <- c("X_Coord", "Y_Coord")
   
-  # Bind metadata (ensure order matches)
   if (nrow(ind_coords) != nrow(metadata)) stop("Metadata/PCA dimension mismatch.")
   plot_data <- cbind(metadata, ind_coords)
   
-  # 2. Extract Variance Explained
-  eig_val <- get_eigenvalue(pca_res)
-  var_x <- round(eig_val[dim_x, 2], 1)
-  var_y <- round(eig_val[dim_y, 2], 1)
+  # 2. Logic for Highlights
+  # Default state: No Highlight
+  plot_data$Highlight_Type <- "Standard"
+  plot_data$Stroke_Size <- 0.5 # Default thickness
   
-  # 3. Base Plot (Individuals)
-  p <- ggplot(plot_data, aes(x = X_Coord, y = Y_Coord, color = Group, fill = Group)) +
+  # Identify the column to search
+  target_col <- names(metadata)[grepl(find_col_keyword, names(metadata), ignore.case = TRUE)][1]
+  
+  has_highlights <- !is.null(highlight_patterns) && length(highlight_patterns) > 0 && !is.na(target_col)
+  
+  if (has_highlights) {
+    target_values <- as.character(plot_data[[target_col]])
+    
+    for (pattern in names(highlight_patterns)) {
+      matches <- grepl(pattern, target_values)
+      # Only overwrite if currently Standard (prevents overwriting higher priority matches)
+      to_update <- matches & (plot_data$Highlight_Type == "Standard")
+      
+      if (any(to_update)) {
+        plot_data$Highlight_Type[to_update] <- pattern 
+        plot_data$Stroke_Size[to_update] <- 2.0  # Thicker border for highlights
+      }
+    }
+  }
+  
+  # Prepare Color Scale for Borders
+  border_colors <- c("Standard" = "white")
+  if (has_highlights) {
+    border_colors <- c(highlight_patterns, border_colors)
+  }
+  
+  # 3. Variance Explained
+  eig_val <- get_eigenvalue(pca_res)
+  var_x <- round(eig_val[dims[1], 2], 1)
+  var_y <- round(eig_val[dims[2], 2], 1)
+  
+  # 4. Plotting
+  p <- ggplot(plot_data, aes(x = X_Coord, y = Y_Coord, fill = Group)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "gray80") +
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray80") +
-    # Ellipses for groups (optional logic: needs enough points)
     stat_ellipse(geom = "polygon", alpha = 0.1, show.legend = FALSE, level = 0.95) +
-    # Points
-    geom_point(size = 3, alpha = 0.8, shape = 21, color = "white", stroke = 0.5) +
-    # aes(fill = Group) +  <-- Removed redundant aes call, handled in main aes
-    scale_color_manual(values = colors) +
-    scale_fill_manual(values = colors) +
+    
+    # Points with dynamic aesthetics
+    # Mapping stroke directly to the numeric column
+    geom_point(aes(color = Highlight_Type, stroke = Stroke_Size), 
+               size = 3.5, shape = 21) +
+    
+    # Main Fill Colors (Clinical Group)
+    scale_fill_manual(values = colors, guide = guide_legend(override.aes = list(shape = 21))) +
+    
+    # Border Colors (Highlights)
+    scale_color_manual(name = "Subgroup", values = border_colors) +
+    
+    # [FIX] Use Identity Scale for continuous numeric values (0.5 and 2.0)
+    scale_continuous_identity(aesthetics = "stroke") +
+    
     labs(
-      x = sprintf("PC%d (%s%%)", dim_x, var_x),
-      y = sprintf("PC%d (%s%%)", dim_y, var_y),
-      title = sprintf("PCA: Immunological Landscape (PC%d vs PC%d)", dim_x, dim_y),
-      subtitle = "Euclidean distance on CLR = Aitchison distance on Raw"
+      x = sprintf("PC%d (%s%%)", dims[1], var_x),
+      y = sprintf("PC%d (%s%%)", dims[2], var_y),
+      title = sprintf("PCA (PC%d vs PC%d)", dims[1], dims[2]),
+      subtitle = if(has_highlights) "Colored borders indicate specific subgroups" else NULL
     ) +
     theme_coda()
   
-  # 4. Optional Labels
+  # Hide legend if no highlights exist
+  if (!has_highlights) {
+    p <- p + guides(color = "none")
+  }
+  
   if (show_labels) {
-    p <- p + geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE, max.overlaps = 20)
+    p <- p + geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE, max.overlaps = 15)
   }
   
   return(p)
 }
-
 #' @title Plot Multivariate Normality (QQ Plot)
 #' @description 
 #' Plots squared Mahalanobis distances against Chi-Square quantiles.

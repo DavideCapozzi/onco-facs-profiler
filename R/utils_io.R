@@ -31,18 +31,18 @@ load_config <- function(config_path = "config/global_params.yml") {
 }
 
 #' @title Load Raw Data (Excel)
-#' @description Iterates over sheets defined in config and merges them.
+#' @description Iterates over sheets defined in config and merges them, preserving metadata.
 #' @param config The loaded configuration object.
-#' @return A raw dataframe with Patient_ID and Group.
+#' @return A raw dataframe with Patient_ID, Group, and Subgroup info.
 load_raw_data <- function(config) {
   input_file <- config$input_file
+  subgroup_col <- config$metadata$subgroup_col # Read from config
   
   if (!file.exists(input_file)) {
     stop(sprintf("Input data file not found: %s", input_file))
   }
   
   df_list <- list()
-  
   message("[IO] Loading Excel sheets...")
   
   for (cohort_name in names(config$cohorts)) {
@@ -52,12 +52,18 @@ load_raw_data <- function(config) {
       # Load sheet
       raw_tmp <- read_excel(input_file, sheet = sheet_name)
       
-      # Rename first column to Patient_ID standard
+      # Standardize Patient_ID
       colnames(raw_tmp)[1] <- "Patient_ID"
       
-      # Ensure numeric conversion (suppressing warnings for non-numeric coercion)
+      # 1. Identify Marker columns (exclude ID and the specific Subgroup column)
+      cols_to_exclude <- c("Patient_ID")
+      if (!is.null(subgroup_col) && subgroup_col %in% colnames(raw_tmp)) {
+        cols_to_exclude <- c(cols_to_exclude, subgroup_col)
+      }
+      
+      # 2. Convert ONLY marker columns to numeric
       clean_tmp <- raw_tmp %>%
-        mutate(across(-1, ~suppressWarnings(as.numeric(as.character(.))))) %>%
+        mutate(across(-all_of(cols_to_exclude), ~suppressWarnings(as.numeric(as.character(.))))) %>%
         mutate(Group = cohort_name, .after = Patient_ID)
       
       df_list[[cohort_name]] <- clean_tmp

@@ -39,8 +39,11 @@ marker_selection:
 hybrid_groups:
   Differentiation: ["CM", "EFF", "EM", "NAIVE"]
   Lineage: ["CD4", "CD8"]  
+  Treg_Status: ["RESTING", "ACTIVE", "NON-SUPPRESSIVE"]
   
-
+metadata:
+  subgroup_col: "Original_Source"
+  
 # --- Visuals ---
 colors:
   Healthy: "#2E8B57"  # SeaGreen

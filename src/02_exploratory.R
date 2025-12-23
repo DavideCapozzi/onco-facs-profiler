@@ -28,18 +28,11 @@ DATA <- readRDS(input_file)
 
 # MAPPING NEW DATA STRUCTURE (from Step 1)
 # ------------------------------------------------------------------------------
-# hybrid_data_z: Matrice Z-scored completa (Markers funzionali + CLR).
-#                Include Patient_ID e Group.
 df_global <- DATA$hybrid_data_z 
-
-# ilr_balances: Lista di matrici ILR per i sottogruppi (es. Differentiation).
-#               NOTA: Queste matrici non hanno metadati dentro (sono numeric matrix),
-#               dobbiamo ri-associarli per i test.
 ilr_list <- DATA$ilr_balances 
-
-meta_cols <- c("Patient_ID", "Group")
 metadata  <- DATA$metadata
 my_colors <- get_palette(config)
+safe_markers <- DATA$hybrid_markers
 
 out_dir <- file.path(config$output_root, "02_exploratory")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
@@ -53,10 +46,12 @@ message(sprintf("[Data] Global Matrix: %d Samples x %d Markers (Z-Scored)",
 message("[PCA] Running PCA on Global Z-Scored Matrix...")
 
 # Prepare Matrix (Exclude metadata)
-pca_input <- df_global %>% select(-all_of(meta_cols)) %>% as.matrix()
+pca_input <- df_global[, safe_markers]
 
 # Run PCA (FactoMineR)
 res_pca <- PCA(pca_input, scale.unit = FALSE, graph = FALSE)
+
+highlight_map <- c("_LS" = "#FFD700")
 
 # --- 1. INDIVIDUALS PCA PLOT ---
 message("[PCA] Saving Individuals plots to single PDF...")
@@ -68,13 +63,13 @@ pdf(pdf_ind_path, width = 8, height = 6)
 SHOW_LABELS_PCA <- TRUE 
 
 # Page 1: PC1 vs PC2
-print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 2), show_labels = SHOW_LABELS_PCA))
+print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 2), show_labels = SHOW_LABELS_PCA, highlight_patterns = highlight_map))
 
 # Page 2: PC1 vs PC3
-print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 3), show_labels = SHOW_LABELS_PCA))
+print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 3), show_labels = SHOW_LABELS_PCA, highlight_patterns = highlight_map))
 
 # Page 3: PC2 vs PC3
-print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(2, 3), show_labels = SHOW_LABELS_PCA))
+print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(2, 3), show_labels = SHOW_LABELS_PCA, highlight_patterns = highlight_map))
 
 dev.off() 
 
@@ -115,15 +110,25 @@ ggsave(file.path(out_dir, "PCA_Global_Scree.pdf"), p_scree, width = 6, height = 
 # ==============================================================================
 # PART B: STATISTICAL TESTING (PERMANOVA)
 # ==============================================================================
-# Inizializziamo un Workbook Excel per salvare tutti i risultati
 wb <- createWorkbook()
 
-# 1. GLOBAL PERMANOVA (Is there a generic difference?)
+# 1. GLOBAL PERMANOVA
 # ------------------------------------------------------------------------------
 message("\n[Stats] Running Global PERMANOVA (All Markers)...")
-perm_global <- test_coda_permanova(df_global, group_col = "Group", 
-                                   metadata_cols = "Patient_ID", 
-                                   n_perm = config$stats$n_perm)
+
+# [ROBUST FIX] Construct input data using the whitelist.
+# We explicitly select ONLY the Group column and the validated numeric markers.
+# This automatically drops 'Patient_ID', 'Original_Source', or any other metadata.
+df_stats_global <- df_global[, c("Group", safe_markers)]
+
+# Now we run the test. 
+# metadata_cols is set to NULL because we already cleaned the data above.
+perm_global <- test_coda_permanova(
+  data_input = df_stats_global, 
+  group_col = "Group", 
+  metadata_cols = NULL, 
+  n_perm = config$stats$n_perm
+)
 
 message(sprintf("   -> Global p-value: %.5f (R2: %.2f%%)", 
                 perm_global$`Pr(>F)`[1], perm_global$R2[1] * 100))
@@ -134,26 +139,30 @@ writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
 # 2. LOCAL PERMANOVA (Sub-groups ILR Balances)
 # ------------------------------------------------------------------------------
-# Testiamo se specifici assi composizionali (es. Naive vs Memory) sono diversi.
-# Questo sostituisce la MANOVA.
-
 if (length(ilr_list) > 0) {
   message("\n[Stats] Running Local PERMANOVA on Compositional Groups (ILR)...")
   
   summary_local <- data.frame()
   
   for (grp_name in names(ilr_list)) {
-    # Recupera la matrice ILR
+    
     mat_ilr <- ilr_list[[grp_name]]
     
-    # Ricostruisci un df con i metadati per la funzione permanova
-    # Assumiamo che l'ordine delle righe sia preservato (Step 1 garantisce questo)
-    df_test <- cbind(metadata, as.data.frame(mat_ilr))
+    # [ROBUST FIX] Construct input data specifically for this group.
+    # We bind the 'Group' column from metadata directly with the numeric ILR matrix.
+    # This ensures no other metadata columns (like Original_Source) are included.
+    df_stats_local <- cbind(
+      metadata[, "Group", drop = FALSE], 
+      as.data.frame(mat_ilr)
+    )
     
     # Run Test
-    res_perm <- test_coda_permanova(df_test, group_col = "Group", 
-                                    metadata_cols = "Patient_ID", 
-                                    n_perm = config$stats$n_perm)
+    res_perm <- test_coda_permanova(
+      data_input = df_stats_local, 
+      group_col = "Group", 
+      metadata_cols = NULL, 
+      n_perm = config$stats$n_perm
+    )
     
     # Store Summary
     pval <- res_perm$`Pr(>F)`[1]
@@ -168,13 +177,11 @@ if (length(ilr_list) > 0) {
       F_Model = res_perm$F[1]
     ))
     
-    # Save detailed result to Excel sheet
-    sheet_name <- substr(paste0("ILR_", grp_name), 1, 31) # Excel limit 31 chars
+    sheet_name <- substr(paste0("ILR_", grp_name), 1, 31) 
     addWorksheet(wb, sheet_name)
     writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
   }
   
-  # Save Summary Table
   addWorksheet(wb, "Summary_Local_Tests")
   writeData(wb, "Summary_Local_Tests", summary_local)
 }

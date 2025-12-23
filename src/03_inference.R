@@ -29,10 +29,8 @@ DATA <- readRDS(input_file)
 # We use Z-scored data for networks to ensure numerical stability during shrinkage
 df_input <- DATA$hybrid_data_z 
 
-# Extract marker names dynamically from the dataframe columns
-# This avoids mismatches if column names were cleaned in Step 1
-meta_cols <- c("Patient_ID", "Group")
-markers   <- setdiff(colnames(df_input), meta_cols)
+if (is.null(DATA$hybrid_markers)) stop("Critical: 'hybrid_markers' whitelist missing in data_processed.rds. Re-run Step 1.")
+markers <- DATA$hybrid_markers
 
 # 2. Prepare Data Subsets
 grp_ctrl <- config$control_group

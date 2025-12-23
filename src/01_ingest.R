@@ -24,7 +24,14 @@ if (is.null(config$hybrid_groups)) {
 raw_data <- load_raw_data(config)
 
 # 2. Setup Matrices
+subgroup_col <- config$metadata$subgroup_col
 meta_cols <- c("Patient_ID", "Group")
+
+if (!is.null(subgroup_col) && subgroup_col %in% names(raw_data)) {
+  meta_cols <- c(meta_cols, subgroup_col)
+  message(sprintf("[Data] Tracking extra metadata column: %s", subgroup_col))
+}
+
 marker_cols <- setdiff(names(raw_data), meta_cols)
 
 mat_raw <- as.matrix(raw_data[, marker_cols])
@@ -141,6 +148,7 @@ processed_data <- list(
   markers         = colnames(mat_raw),      
   raw_matrix      = mat_raw,
   imputed_data    = cbind(raw_data[, meta_cols], as.data.frame(mat_imputed)),
+  hybrid_markers  = colnames(mat_hybrid_z),
   hybrid_data_raw = df_hybrid_raw,  # Transformed (CLR/Log), NO Z-score
   hybrid_data_z   = df_hybrid_z,    # Transformed AND Z-scored
   ilr_balances    = ilr_list,
