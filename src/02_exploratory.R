@@ -26,13 +26,14 @@ if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.
 
 DATA <- readRDS(input_file)
 
-# MAPPING NEW DATA STRUCTURE (from Step 1)
+# MAPPING DATA STRUCTURE (from Step 1)
 # ------------------------------------------------------------------------------
 df_global <- DATA$hybrid_data_z 
 ilr_list <- DATA$ilr_balances 
 metadata  <- DATA$metadata
 my_colors <- get_palette(config)
 safe_markers <- DATA$hybrid_markers
+raw_matrix <- DATA$raw_matrix
 
 out_dir <- file.path(config$output_root, "02_exploratory")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
@@ -41,7 +42,72 @@ message(sprintf("[Data] Global Matrix: %d Samples x %d Markers (Z-Scored)",
                 nrow(df_global), ncol(df_global) - length(meta_cols)))
 
 # ==============================================================================
-# PART A: PCA (Global Hybrid View)
+# PART A: RAW DATA DIAGNOSTICS (Unified Distribution Checks)
+# ==============================================================================
+message("[Diagnostics] Generating unified distribution plots for RAW data...")
+
+# 1. Prepare Raw Data with Metadata
+if (!all(rownames(raw_matrix) %in% metadata$Patient_ID)) {
+  warning("[Diagnostics] Mismatch between Raw Matrix IDs and Metadata IDs.")
+}
+
+meta_ordered <- metadata[match(rownames(raw_matrix), metadata$Patient_ID), ]
+df_raw_viz <- cbind(meta_ordered, as.data.frame(raw_matrix))
+
+# --- LOGIC CHANGE: Merge Tumor Groups for Visualization ---
+# We create a temporary dataframe for plotting to preserve original data for stats.
+df_viz_merged <- df_raw_viz
+control_grp <- config$control_group  # e.g., "Healthy"
+
+# If Group is NOT Control, rename to "Tumor"
+# (Assumes config$control_group matches exactly the string in metadata)
+df_viz_merged$Group <- ifelse(
+  df_viz_merged$Group == control_grp, 
+  control_grp, 
+  "Tumor"
+)
+
+# Define a visualization palette specifically for this 2-group view
+# We use the Healthy color from config, and a generic color (e.g., SteelBlue) for Tumor
+viz_colors <- c()
+viz_colors[[control_grp]] <- my_colors[[control_grp]] 
+viz_colors[["Tumor"]] <- "#4682B4" # Manual assignment or pick from config
+
+# Handle case where control_group might be named differently in config vs data
+if (is.null(viz_colors[[control_grp]])) viz_colors[[control_grp]] <- "green4"
+
+message(sprintf("   -> Groups merged into: %s", paste(names(viz_colors), collapse = ", ")))
+
+# 2. Setup Output - Single PDF
+raw_pdf_path <- file.path(out_dir, "Distributions_Raw_Merged_Stats.pdf")
+
+# 3. Generate Plots
+message(sprintf("   -> Saving plots to: %s", raw_pdf_path))
+
+pdf(raw_pdf_path, width = 8, height = 6) 
+
+# Loop over ALL markers
+for (marker in DATA$markers) {
+  
+  if (marker %in% names(df_viz_merged)) {
+    
+    p <- plot_raw_distribution_merged(
+      data_df = df_viz_merged, # Passing the merged dataframe
+      marker_name = marker,
+      colors = viz_colors,     # Passing the simplified palette
+      highlight_pattern = "_LS",   
+      highlight_color = "#FFD700"  
+    )
+    
+    if (!is.null(p)) print(p)
+  }
+}
+
+dev.off()
+message("[Diagnostics] Raw distribution analysis complete.\n")
+
+# ==============================================================================
+# PART B: PCA (Global Hybrid View)
 # ==============================================================================
 message("[PCA] Running PCA on Global Z-Scored Matrix...")
 
@@ -108,7 +174,7 @@ p_scree <- fviz_eig(res_pca, addlabels = TRUE, ylim = c(0, 50)) +
 ggsave(file.path(out_dir, "PCA_Global_Scree.pdf"), p_scree, width = 6, height = 4)
 
 # ==============================================================================
-# PART B: STATISTICAL TESTING (PERMANOVA)
+# PART C: STATISTICAL TESTING (PERMANOVA)
 # ==============================================================================
 wb <- createWorkbook()
 
@@ -187,7 +253,7 @@ if (length(ilr_list) > 0) {
 }
 
 # ==============================================================================
-# PART C: SAVE OUTPUT
+# PART D: SAVE OUTPUT
 # ==============================================================================
 
 excel_path <- file.path(out_dir, "Statistical_Test_Results.xlsx")

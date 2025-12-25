@@ -40,6 +40,92 @@ get_palette <- function(config) {
   return(unlist(config$colors))
 }
 
+# R/modules_viz.R
+
+#' @title Plot Merged Raw Distribution with Highlights & Stats
+#' @description 
+#' Visualizes raw marker distribution.
+#' Features: Violin (density), Jitter (points), Mean (Dashed Red), Median (Solid Black).
+#' 
+#' @param data_df Dataframe containing 'Group', metadata columns, and the marker.
+#' @param marker_name Name of the marker column to plot.
+#' @param colors Named vector of colors for the Groups.
+#' @param highlight_pattern String pattern to search in 'Original_Source' (default: "_LS").
+#' @param highlight_color Color for the border of highlighted points (default: "#FFD700").
+#' @return A ggplot object.
+plot_raw_distribution_merged <- function(data_df, marker_name, colors, 
+                                         highlight_pattern = "_LS", 
+                                         highlight_color = "#FFD700") {
+  
+  require(ggplot2)
+  require(dplyr)
+  
+  # 1. Validation
+  if (!marker_name %in% names(data_df)) return(NULL)
+  
+  # 2. Prepare Data & Highlighting Logic
+  src_col <- names(data_df)[grepl("Original|Source", names(data_df), ignore.case = TRUE)][1]
+  
+  plot_data <- data_df
+  plot_data$Value <- plot_data[[marker_name]]
+  
+  # Define Highlight Attributes defaults
+  plot_data$Highlight_Type <- "Standard"
+  plot_data$Stroke_Size <- 0.2
+  
+  if (!is.na(src_col)) {
+    is_target <- grepl(highlight_pattern, plot_data[[src_col]])
+    if (any(is_target)) {
+      plot_data$Highlight_Type[is_target] <- "Target"
+      plot_data$Stroke_Size[is_target] <- 1.5
+    }
+  }
+  
+  # 3. Calculate Stats for Subtitle
+  n_na <- sum(is.na(plot_data$Value))
+  pct_na <- round((n_na / nrow(plot_data)) * 100, 1)
+  
+  # 4. Plotting
+  p <- ggplot(plot_data, aes(x = Group, y = Value, fill = Group)) +
+    
+    # Layer 1: Violin
+    geom_violin(alpha = 0.4, trim = FALSE, color = NA, scale = "width") +
+    
+    # Layer 2: Jittered Points
+    geom_jitter(aes(color = Highlight_Type, stroke = Stroke_Size), 
+                width = 0.2, size = 2.5, shape = 21, alpha = 0.8) +
+    
+    # Layer 3: Median (Solid Black Line)
+    stat_summary(fun = median, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+                 width = 0.5, size = 0.8, color = "black") +
+    
+    # Layer 4: Mean (Dashed Red Line)
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+                 width = 0.5, size = 0.8, color = "darkred", linetype = "dashed") +
+    
+    # Colors
+    scale_fill_manual(values = colors) +
+    scale_color_manual(values = c("Standard" = "white", "Target" = highlight_color), 
+                       guide = "none") +
+    scale_continuous_identity(aesthetics = "stroke") +
+    
+    # Styling
+    labs(
+      title = paste("Raw Distribution:", marker_name),
+      subtitle = sprintf("Stats: Black Line = Median | Red Dashed = Mean | Highlight: '%s'", 
+                         highlight_pattern),
+      y = "Raw Value",
+      x = NULL
+    ) +
+    theme_coda() +
+    theme(
+      legend.position = "none", # Legend redundant as X axis labels exist
+      axis.text.x = element_text(face = "bold", size = 11)
+    )
+  
+  return(p)
+}
+
 #' @title Run PCA on Compositional Data
 #' @description Wraps FactoMineR::PCA with settings appropriate for CLR data.
 #' @param data_matrix A numeric matrix (CLR transformed markers).
