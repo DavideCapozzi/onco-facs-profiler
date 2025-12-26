@@ -96,7 +96,7 @@ for (group_name in names(config$hybrid_groups)) {
     mat_trans <- coda_transform_clr(mat_sub)
   } else {
     message(sprintf("   [Group: %s] 1 marker found (%s) -> Fallback to Log1p", group_name, present_mks))
-    mat_trans <- log1p(mat_sub)
+    mat_trans <- coda_transform_logit(mat_sub)
   }
   
   transformed_list[[group_name]] <- mat_trans
@@ -109,7 +109,7 @@ unassigned_markers <- setdiff(all_markers, assigned_markers)
 if (length(unassigned_markers) > 0) {
   message(sprintf("   [Group: Functional/Other] %d markers -> Applying Log1p", length(unassigned_markers)))
   mat_sub <- mat_imputed[, unassigned_markers, drop = FALSE]
-  mat_trans <- log1p(mat_sub)
+  mat_trans <- coda_transform_logit(mat_sub)
   
   transformed_list[["Functional"]] <- mat_trans
 }

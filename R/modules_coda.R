@@ -165,3 +165,50 @@ coda_compute_local_ilr <- function(mat_imputed, hybrid_groups) {
   
   return(ilr_results)
 }
+
+#' @title Robust Logit Transformation
+#' @description 
+#' Transforms percentages (0-100) or proportions (0-1) into Logit space (Log-Odds).
+#' Crucially, it handles boundary conditions (0% and 100%) by clamping values 
+#' to a safety range [epsilon, 1-epsilon] to avoid infinite results.
+#' 
+#' @param mat A numeric matrix or vector.
+#' @param epsilon A small numeric constant to prevent division by zero or log(0). 
+#'        Default is 1e-6 (0.0001%).
+#' @return A matrix of the same dimensions, transformed to real space (-Inf, +Inf).
+coda_transform_logit <- function(mat, epsilon = 1e-6) {
+  
+  # 1. Validation and Auto-Scaling
+  # Check if data looks like percentages (0-100) or proportions (0-1).
+  # If max value > 1, assume percentages and divide by 100.
+  max_val <- max(mat, na.rm = TRUE)
+  
+  p <- if (max_val > 1.0) {
+    message("   [CoDa] Detected percentages (0-100). Scaling to proportions (0-1)...")
+    mat / 100
+  } else {
+    mat
+  }
+  
+  # 2. Boundary Protection (Clamping)
+  # Logit is undefined for p=0 (gives -Inf) and p=1 (gives +Inf).
+  # We clamp values within [epsilon, 1-epsilon].
+  # This preserves the distribution shape without breaking downstream PCA/Networks.
+  
+  # Count boundary hits for logging
+  n_low  <- sum(p < epsilon, na.rm = TRUE)
+  n_high <- sum(p > (1 - epsilon), na.rm = TRUE)
+  
+  if (n_low > 0 || n_high > 0) {
+    message(sprintf("   [CoDa] Clamped %d boundary values (0 or 1) to epsilon range.", n_low + n_high))
+  }
+  
+  p[p < epsilon] <- epsilon
+  p[p > (1 - epsilon)] <- 1 - epsilon
+  
+  # 3. Logit Transformation
+  # Formula: log( p / (1 - p) )
+  logit_mat <- log(p / (1 - p))
+  
+  return(logit_mat)
+}
