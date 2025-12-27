@@ -10,15 +10,18 @@ library(dplyr)
 library(foreach)
 
 #' @title Infer Robust Partial Correlation Network
-#' @description Uses Schafer-Strimmer Shrinkage to directly estimate partial correlations.
-#' @param mat Numeric matrix (Samples x Features).
-#' @return Partial correlation matrix with diagonal = 1.
+#' @description Uses Schafer-Strimmer Shrinkage to estimate partial correlations.
 infer_network_pcor <- function(mat) {
-  # Direct calculation using corpcor's optimized function
-  # This performs James-Stein shrinkage on covariance and efficient inversion
-  pcor_mat <- corpcor::pcor.shrink(mat, verbose = FALSE)
+  cov_shrink <- corpcor::cov.shrink(mat, verbose = FALSE)
+  prec_mat <- corpcor::invcov.shrink(mat, verbose = FALSE)
   
-  return(as.matrix(pcor_mat))
+  # Convert to partial correlation (internal helper logic inlined or separate)
+  d <- diag(prec_mat)
+  denom <- sqrt(outer(d, d))
+  part <- -prec_mat / denom
+  diag(part) <- 1
+  
+  return(as.matrix(part))
 }
 
 #' @title Single Bootstrap Worker
@@ -32,7 +35,7 @@ boot_worker_pcor <- function(mat, n) {
 }
 
 #' @title Aggregate Bootstrap Results
-#' @description Calculates edge stability and mean weights based on CI.
+#' @description Calculates edge stability and mean weights.
 aggregate_boot_results <- function(boot_list, alpha = 0.05) {
   valid_boots <- Filter(Negate(is.null), boot_list)
   n_boots <- length(valid_boots)
@@ -50,7 +53,6 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
       vals <- sapply(valid_boots, function(m) m[i, j])
       ci <- quantile(vals, probs = c(alpha / 2, 1 - alpha / 2), na.rm = TRUE)
       
-      # Select edge if CI does not cross zero
       if ((ci[1] > 0) || (ci[2] < 0)) {
         adj_mat[i, j] <- 1; adj_mat[j, i] <- 1
         mu <- mean(vals, na.rm = TRUE)

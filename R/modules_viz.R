@@ -12,6 +12,8 @@ library(ggrepel)
 library(igraph)
 library(tidygraph)
 library(ggraph)
+library(ComplexHeatmap)
+library(circlize)
 
 #' @title Standard Project Theme
 #' @description A consistent ggplot2 theme for publication-quality figures.
@@ -406,17 +408,6 @@ plot_pca_variables <- function(pca_res) {
 #' @param title Plot title.
 #' @return A ComplexHeatmap object (drawn).
 plot_stratification_heatmap <- function(mat_z, metadata, group_colors, title = "Stratification") {
-  
-  # Check dependency
-  if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
-    stop("Package 'ComplexHeatmap' is required. Install via BiocManager::install('ComplexHeatmap').")
-  }
-  if (!requireNamespace("circlize", quietly = TRUE)) {
-    stop("Package 'circlize' is required.")
-  }
-  
-  library(ComplexHeatmap)
-  library(circlize)
   
   # 1. Prepare Data: Transpose so Samples are Columns (Bioinformatics standard)
   # Input: Samples x Markers -> Output: Markers x Samples
