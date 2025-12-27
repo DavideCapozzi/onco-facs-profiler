@@ -107,7 +107,7 @@ dev.off()
 message("[Diagnostics] Raw distribution analysis complete.\n")
 
 # ==============================================================================
-# PART B: PCA (Global Hybrid View)
+# PART B1: PCA (Global Hybrid View)
 # ==============================================================================
 message("[PCA] Running PCA on Global Z-Scored Matrix...")
 
@@ -172,6 +172,43 @@ dev.off()
 p_scree <- fviz_eig(res_pca, addlabels = TRUE, ylim = c(0, 50)) + 
   theme_minimal() + ggtitle("Scree Plot (Global)")
 ggsave(file.path(out_dir, "PCA_Global_Scree.pdf"), p_scree, width = 6, height = 4)
+
+# ==============================================================================
+# PART B2: STRATIFICATION HEATMAP (ComplexHeatmap)
+# ==============================================================================
+message("[Viz] Generating Stratification Heatmap...")
+
+# 1. Prepare Data
+# We rely on 'df_global' (Z-scored) and 'safe_markers' defined earlier
+mat_heatmap_z <- as.matrix(df_global[, safe_markers])
+rownames(mat_heatmap_z) <- df_global$Patient_ID
+
+# Metadata aligned
+meta_heatmap <- df_global[, meta_cols]
+
+# 2. Output PDF
+pdf_heat_path <- file.path(out_dir, "Heatmap_Stratification_Clustered.pdf")
+
+# Note: ComplexHeatmap draws directly to the device
+pdf(pdf_heat_path, width = 10, height = 8)
+
+tryCatch({
+  ht_obj <- plot_stratification_heatmap(
+    mat_z = mat_heatmap_z,
+    metadata = meta_heatmap,
+    group_colors = my_colors,
+    title = "Global Clustering (Hybrid Z-Score)"
+  )
+  draw(ht_obj, merge_legend = TRUE)
+  
+}, error = function(e) {
+  warning(paste("Heatmap generation failed:", e$message))
+  plot.new()
+  text(0.5, 0.5, "Heatmap Failed (Check ComplexHeatmap installation)")
+})
+
+dev.off()
+message(sprintf("   -> Heatmap saved to: %s", pdf_heat_path))
 
 # ==============================================================================
 # PART C: STATISTICAL TESTING (PERMANOVA)

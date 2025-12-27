@@ -395,6 +395,107 @@ plot_pca_variables <- function(pca_res) {
     theme_coda()
 }
 
+#' @title Plot Stratification Heatmap (ComplexHeatmap)
+#' @description 
+#' Generates a clustered heatmap using Z-scored data.
+#' Transposes the matrix to have Markers as Rows and Patients as Columns.
+#' 
+#' @param mat_z A Z-scored numeric matrix (Samples x Markers).
+#' @param metadata Dataframe containing patient metadata (aligned with mat_z rows).
+#' @param group_colors Named vector of colors for the primary group.
+#' @param title Plot title.
+#' @return A ComplexHeatmap object (drawn).
+plot_stratification_heatmap <- function(mat_z, metadata, group_colors, title = "Stratification") {
+  
+  # Check dependency
+  if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
+    stop("Package 'ComplexHeatmap' is required. Install via BiocManager::install('ComplexHeatmap').")
+  }
+  if (!requireNamespace("circlize", quietly = TRUE)) {
+    stop("Package 'circlize' is required.")
+  }
+  
+  library(ComplexHeatmap)
+  library(circlize)
+  
+  # 1. Prepare Data: Transpose so Samples are Columns (Bioinformatics standard)
+  # Input: Samples x Markers -> Output: Markers x Samples
+  mat_plot <- t(mat_z)
+  
+  # 2. Setup Annotations (Top Bar)
+  # Ensure metadata matches matrix order
+  if (!all(rownames(mat_z) == metadata$Patient_ID)) {
+    stop("Mismatch between matrix rownames and metadata Patient_ID")
+  }
+  
+  # Create Annotation Object
+  # We annotate Group and potentially the Subgroup (Original_Source)
+  
+  # Identify Subgroup column dynamically
+  sub_col <- names(metadata)[grepl("Original|Source", names(metadata), ignore.case = TRUE)][1]
+  
+  annot_df <- data.frame(Group = metadata$Group)
+  
+  # Define annotation colors
+  annot_cols <- list(Group = group_colors)
+  
+  # Add Subgroup if exists
+  if (!is.na(sub_col)) {
+    annot_df[[sub_col]] <- metadata[[sub_col]]
+    
+    # Generate random distinct colors for subgroups if not provided
+    n_subs <- length(unique(metadata[[sub_col]]))
+    if (n_subs > 0) {
+      sub_colors <- structure(
+        circlize::rand_color(n_subs, luminosity = "bright"), 
+        names = unique(metadata[[sub_col]])
+      )
+      annot_cols[[sub_col]] <- sub_colors
+    }
+  }
+  
+  ha <- HeatmapAnnotation(
+    df = annot_df,
+    col = annot_cols,
+    simple_anno_size = unit(0.3, "cm"),
+    show_annotation_name = TRUE
+  )
+  
+  # 3. Define Color Map for Z-Scores
+  # Blue (-2) -> White (0) -> Red (+2) is standard for standardized data
+  col_fun <- colorRamp2(c(-2, 0, 2), c("#2166AC", "#F7F7F7", "#B2182B"))
+  
+  # 4. Draw Heatmap
+  hm <- Heatmap(
+    mat_plot,
+    name = "Z-Score",
+    col = col_fun,
+    
+    # Clustering
+    cluster_rows = TRUE,
+    cluster_columns = TRUE,
+    clustering_distance_rows = "euclidean",
+    clustering_distance_columns = "euclidean",
+    clustering_method_rows = "ward.D2",
+    clustering_method_columns = "ward.D2",
+    
+    # Annotations
+    top_annotation = ha,
+    
+    # Aesthetics
+    row_names_gp = gpar(fontsize = 8),
+    column_names_gp = gpar(fontsize = 6),
+    show_column_names = FALSE, # Hide Patient IDs if too many
+    row_dend_width = unit(2, "cm"),
+    column_dend_height = unit(2, "cm"),
+    
+    column_title = paste0(title, " (n=", ncol(mat_plot), ")"),
+    row_title = "Markers"
+  )
+  
+  return(hm)
+}
+
 #' @title Plot Network Graph (ggraph)
 #' @description 
 #' @param min_cor Minimum absolute partial correlation to visualize (default 0).
