@@ -125,7 +125,6 @@ message("[PCA] Saving Individuals plots to single PDF...")
 pdf_ind_path <- file.path(out_dir, "PCA_Global_Individuals_MultiPage.pdf")
 pdf(pdf_ind_path, width = 8, height = 6)
 
-# Configurazione Label
 SHOW_LABELS_PCA <- TRUE 
 
 # Page 1: PC1 vs PC2

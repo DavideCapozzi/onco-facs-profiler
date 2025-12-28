@@ -129,9 +129,11 @@ mat_hybrid_raw <- mat_hybrid_tmp
 # 4. Save Z-SCORED Hybrid - Useful for PCA, Heatmaps, Networks
 message("   [Norm] Applying Z-Score Standardization to Hybrid Matrix...")
 mat_hybrid_z <- scale(mat_hybrid_raw)
-mat_hybrid_z <- matrix(as.numeric(mat_hybrid_z), 
-                       nrow = nrow(mat_hybrid_z), 
-                       dimnames = dimnames(mat_hybrid_z))
+# scale returns a matrix-array, usually safe to keep as is, 
+# but to ensure it's a plain matrix:
+attr(mat_hybrid_z, "scaled:center") <- NULL
+attr(mat_hybrid_z, "scaled:scale") <- NULL
+mat_hybrid_z <- as.matrix(mat_hybrid_z)
 
 # E. Compute Local ILR (For Statistical Inference only)
 ilr_list <- coda_compute_local_ilr(mat_imputed, config$hybrid_groups)
