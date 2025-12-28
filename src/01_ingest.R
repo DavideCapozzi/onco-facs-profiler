@@ -15,6 +15,7 @@ source("R/modules_qc.R")
 message("\n=== PIPELINE STEP 1: INGESTION & HYBRID TRANSFORM ===")
 
 # 1. Load Config & Data
+# ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
 
 if (is.null(config$hybrid_groups)) {
@@ -24,6 +25,7 @@ if (is.null(config$hybrid_groups)) {
 raw_data <- load_raw_data(config)
 
 # 2. Setup Matrices
+# ------------------------------------------------------------------------------
 subgroup_col <- config$metadata$subgroup_col
 meta_cols <- c("Patient_ID", "Group")
 
@@ -51,6 +53,7 @@ if (!is.null(config$marker_selection$blacklist) && length(config$marker_selectio
 mat_raw <- mat_raw[, target_markers, drop = FALSE]
 
 # 3. Quality Control
+# ------------------------------------------------------------------------------
 qc_result <- run_qc_pipeline(mat_raw, config$qc, dropped_apriori = data.frame())
 mat_raw <- qc_result$data
 qc_summary <- qc_result$report
@@ -103,7 +106,7 @@ for (group_name in names(config$hybrid_groups)) {
   assigned_markers <- c(assigned_markers, present_mks)
 }
 
-# C. Process Functional/Remaining Markers (Log1p)
+# C. Process Functional/Remaining Markers (Logit)
 unassigned_markers <- setdiff(all_markers, assigned_markers)
 
 if (length(unassigned_markers) > 0) {
@@ -114,23 +117,22 @@ if (length(unassigned_markers) > 0) {
   transformed_list[["Functional"]] <- mat_trans
 }
 
-# D. Reconstruct & Normalization
+# 5. Reconstruct & Normalization
 # ------------------------------------------------------------------------------
-# 1. Merge pieces
+# A. Merge pieces
 mat_hybrid_tmp <- do.call(cbind, transformed_list)
 
-# 2. Clean column names (Remove "Group." prefix if added by list binding)
+# B. Clean column names (Remove "Group." prefix if added by list binding)
 colnames(mat_hybrid_tmp) <- sub("^[^.]+\\.", "", colnames(mat_hybrid_tmp))
 mat_hybrid_tmp <- mat_hybrid_tmp[, sort(colnames(mat_hybrid_tmp)), drop = FALSE]
 
-# 3. Save RAW Hybrid (Transformed but NOT Z-scored) - Useful for univariate tests
+# C. Save RAW Hybrid (Transformed but NOT Z-scored) - Useful for univariate tests
 mat_hybrid_raw <- mat_hybrid_tmp
 
-# 4. Save Z-SCORED Hybrid - Useful for PCA, Heatmaps, Networks
+# D. Save Z-SCORED Hybrid - Useful for PCA, Heatmaps, Networks
 message("   [Norm] Applying Z-Score Standardization to Hybrid Matrix...")
 mat_hybrid_z <- scale(mat_hybrid_raw)
-# scale returns a matrix-array, usually safe to keep as is, 
-# but to ensure it's a plain matrix:
+# ensure it's a plain matrix:
 attr(mat_hybrid_z, "scaled:center") <- NULL
 attr(mat_hybrid_z, "scaled:scale") <- NULL
 mat_hybrid_z <- as.matrix(mat_hybrid_z)
@@ -139,7 +141,7 @@ mat_hybrid_z <- as.matrix(mat_hybrid_z)
 ilr_list <- coda_compute_local_ilr(mat_imputed, config$hybrid_groups)
 
 
-# 5. Save Output
+# 6. Save Output
 # ------------------------------------------------------------------------------
 # We save both versions of the matrix for downstream flexibility
 df_hybrid_raw <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_raw))

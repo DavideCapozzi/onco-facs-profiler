@@ -10,7 +10,6 @@ suppressPackageStartupMessages({
   library(ggraph)
 })
 
-# UPDATED IMPORTS
 source("R/utils_io.R")          
 source("R/modules_network.R")   
 source("R/modules_viz.R")       

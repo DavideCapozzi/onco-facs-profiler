@@ -11,7 +11,6 @@ suppressPackageStartupMessages({
   library(vegan)
 })
 
-# Source modules
 source("R/utils_io.R")          
 source("R/modules_hypothesis.R") 
 source("R/modules_viz.R")
@@ -19,6 +18,7 @@ source("R/modules_viz.R")
 message("\n=== PIPELINE STEP 2: EXPLORATORY & STATS (Hybrid/Z-Score) ===")
 
 # 1. Load Config & Data
+# ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
 input_file <- file.path(config$output_root, "01_QC", "data_processed.rds")
 
@@ -26,8 +26,7 @@ if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.
 
 DATA <- readRDS(input_file)
 
-# MAPPING DATA STRUCTURE (from Step 1)
-# ------------------------------------------------------------------------------
+# Mapping data structure
 df_global <- DATA$hybrid_data_z 
 ilr_list <- DATA$ilr_balances 
 metadata  <- DATA$metadata
@@ -41,12 +40,11 @@ if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 message(sprintf("[Data] Global Matrix: %d Samples x %d Markers (Z-Scored)", 
                 nrow(df_global), ncol(df_global) - length(meta_cols)))
 
-# ==============================================================================
-# PART A: RAW DATA DIAGNOSTICS (Unified Distribution Checks)
-# ==============================================================================
+# 2. Data diagnostics
+# ------------------------------------------------------------------------------
 message("[Diagnostics] Generating unified distribution plots for RAW data...")
 
-# 1. Prepare Raw Data with Metadata
+# A. Prepare Raw Data with Metadata
 if (!all(rownames(raw_matrix) %in% metadata$Patient_ID)) {
   warning("[Diagnostics] Mismatch between Raw Matrix IDs and Metadata IDs.")
 }
@@ -54,8 +52,7 @@ if (!all(rownames(raw_matrix) %in% metadata$Patient_ID)) {
 meta_ordered <- metadata[match(rownames(raw_matrix), metadata$Patient_ID), ]
 df_raw_viz <- cbind(meta_ordered, as.data.frame(raw_matrix))
 
-# --- LOGIC CHANGE: Merge Tumor Groups for Visualization ---
-# We create a temporary dataframe for plotting to preserve original data for stats.
+# Create a temporary dataframe for plotting to preserve original data for stats.
 df_viz_merged <- df_raw_viz
 control_grp <- config$control_group  # e.g., "Healthy"
 
@@ -78,10 +75,10 @@ if (is.null(viz_colors[[control_grp]])) viz_colors[[control_grp]] <- "green4"
 
 message(sprintf("   -> Groups merged into: %s", paste(names(viz_colors), collapse = ", ")))
 
-# 2. Setup Output - Single PDF
+# B. Setup Output - Single PDF
 raw_pdf_path <- file.path(out_dir, "Distributions_Raw_Merged_Stats.pdf")
 
-# 3. Generate Plots
+# C. Generate Plots
 message(sprintf("   -> Saving plots to: %s", raw_pdf_path))
 
 pdf(raw_pdf_path, width = 8, height = 6) 
@@ -106,9 +103,8 @@ for (marker in DATA$markers) {
 dev.off()
 message("[Diagnostics] Raw distribution analysis complete.\n")
 
-# ==============================================================================
-# PART B1: PCA (Global Hybrid View)
-# ==============================================================================
+# 3. PCA
+# ------------------------------------------------------------------------------
 message("[PCA] Running PCA on Global Z-Scored Matrix...")
 
 # Prepare Matrix (Exclude metadata)
@@ -119,7 +115,7 @@ res_pca <- PCA(pca_input, scale.unit = FALSE, graph = FALSE)
 
 highlight_map <- c("_LS" = "#FFD700")
 
-# --- 1. INDIVIDUALS PCA PLOT ---
+# A. Individuals PCA plots
 message("[PCA] Saving Individuals plots to single PDF...")
 
 pdf_ind_path <- file.path(out_dir, "PCA_Global_Individuals_MultiPage.pdf")
@@ -139,7 +135,7 @@ print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(2, 3), show_labels
 dev.off() 
 
 
-# --- 2. VARIABLES/LOADINGS PLOT  ---
+# B. Variables/Loadings plots
 message("[PCA] Saving Variables/Loadings plots to single PDF...")
 
 pdf_var_path <- file.path(out_dir, "PCA_Global_Variables_MultiPage.pdf")
@@ -167,17 +163,18 @@ print(plot_vars_dims(res_pca, c(2, 3)))
 dev.off()
 
 
-# --- 3. SCREE PLOT ---
+# C. Scree Plot
 p_scree <- fviz_eig(res_pca, addlabels = TRUE, ylim = c(0, 50)) + 
   theme_minimal() + ggtitle("Scree Plot (Global)")
-ggsave(file.path(out_dir, "PCA_Global_Scree.pdf"), p_scree, width = 6, height = 4)
+pdf(file.path(out_dir, "PCA_Global_Scree.pdf"), width = 6, height = 4)
+print(p_scree)
+dev.off()
 
-# ==============================================================================
-# PART B2: STRATIFICATION HEATMAP (ComplexHeatmap)
-# ==============================================================================
-message("[Viz] Generating Stratification Heatmap...")
+# 4. Patient Stratification Heatmap
+# ------------------------------------------------------------------------------
+message("[Viz] Generating Patient Stratification Heatmap...")
 
-# 1. Prepare Data
+# A. Prepare Data
 # We rely on 'df_global' (Z-scored) and 'safe_markers' defined earlier
 mat_heatmap_z <- as.matrix(df_global[, safe_markers])
 rownames(mat_heatmap_z) <- df_global$Patient_ID
@@ -185,7 +182,7 @@ rownames(mat_heatmap_z) <- df_global$Patient_ID
 # Metadata aligned
 meta_heatmap <- df_global[, meta_cols]
 
-# 2. Output PDF
+# B. Output PDF
 pdf_heat_path <- file.path(out_dir, "Heatmap_Stratification_Clustered.pdf")
 
 # Note: ComplexHeatmap draws directly to the device
@@ -209,13 +206,11 @@ tryCatch({
 dev.off()
 message(sprintf("   -> Heatmap saved to: %s", pdf_heat_path))
 
-# ==============================================================================
-# PART C: STATISTICAL TESTING (PERMANOVA)
-# ==============================================================================
+# 5. Statistical Testing
+# ------------------------------------------------------------------------------
 wb <- createWorkbook()
 
-# 1. GLOBAL PERMANOVA
-# ------------------------------------------------------------------------------
+# A. Global PERMANOVA
 message("\n[Stats] Running Global PERMANOVA (All Markers)...")
 
 # [ROBUST FIX] Construct input data using the whitelist.
@@ -239,8 +234,7 @@ addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
 
-# 2. LOCAL PERMANOVA (Sub-groups ILR Balances)
-# ------------------------------------------------------------------------------
+# B. Local PERMANOVA (Sub-groups ILR Balances)
 if (length(ilr_list) > 0) {
   message("\n[Stats] Running Local PERMANOVA on Compositional Groups (ILR)...")
   
@@ -288,9 +282,8 @@ if (length(ilr_list) > 0) {
   writeData(wb, "Summary_Local_Tests", summary_local)
 }
 
-# ==============================================================================
-# PART D: SAVE OUTPUT
-# ==============================================================================
+# 6. Save Output
+# ------------------------------------------------------------------------------
 
 excel_path <- file.path(out_dir, "Statistical_Test_Results.xlsx")
 saveWorkbook(wb, excel_path, overwrite = TRUE)

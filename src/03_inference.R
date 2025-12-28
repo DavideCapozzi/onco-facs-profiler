@@ -11,13 +11,13 @@ suppressPackageStartupMessages({
   library(corpcor)
 })
 
-# Imports
 source("R/utils_io.R")          
 source("R/modules_network.R")   
 
 message("\n=== PIPELINE STEP 3: ROBUST NETWORK INFERENCE ===")
 
 # 1. Load Config & Data
+# ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
 input_file <- file.path(config$output_root, "01_QC", "data_processed.rds")
 
@@ -25,7 +25,6 @@ if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.
 
 DATA <- readRDS(input_file)
 
-# --- FIX: Load the correct Hybrid Z-Scored Matrix ---
 # We use Z-scored data for networks to ensure numerical stability during shrinkage
 df_input <- DATA$hybrid_data_z 
 
@@ -33,6 +32,7 @@ if (is.null(DATA$hybrid_markers)) stop("Critical: 'hybrid_markers' whitelist mis
 markers <- DATA$hybrid_markers
 
 # 2. Prepare Data Subsets
+# ------------------------------------------------------------------------------
 grp_ctrl <- config$control_group
 grp_case <- config$case_groups
 
@@ -52,6 +52,7 @@ message(sprintf("[Data] Control Group (%s): %d samples", grp_ctrl, nrow(mat_ctrl
 message(sprintf("[Data] Case Group (%s): %d samples", paste(grp_case, collapse="+"), nrow(mat_case)))
 
 # 3. Setup Parallel Cluster
+# ------------------------------------------------------------------------------
 n_cores_req <- config$stats$n_cores
 if (n_cores_req == "auto") n_cores_req <- parallel::detectCores() - 1
 
@@ -140,11 +141,11 @@ message(sprintf("   -> Permutation Stats: %d iterations", n_perm))
 message(sprintf("   -> Max Observed Diff: %.4f | Mean Observed Diff: %.4f", 
                 max_obs_diff, mean_obs_diff))
 
-# 6. Shutdown Cluster
+# Shutdown Cluster
 stopCluster(cl)
 message("[System] Parallel Cluster stopped.")
 
-# 7. Calculate P-values and Save
+# 6. Calculate P-values and Save
 # ------------------------------------------------------------------------------
 message("[Post-Process] Calculating P-values and FDR...")
 
@@ -187,11 +188,15 @@ if(nrow(edges_indices) > 0) {
   results_table <- results_table %>% arrange(P_Value)
 }
 
-# 8. Save Outputs
+# 7. Save Outputs
+# ------------------------------------------------------------------------------
 out_dir <- file.path(config$output_root, "03_networks")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
-write.csv(results_table, file.path(out_dir, "differential_stats.csv"), row.names = FALSE)
+wb_diff <- createWorkbook()
+addWorksheet(wb_diff, "Differential_Edges")
+writeData(wb_diff, "Differential_Edges", results_table)
+saveWorkbook(wb_diff, file.path(out_dir, "Differential_Stats.xlsx"), overwrite = TRUE)
 
 final_obj <- list(
   ctrl_network = res_ctrl,
