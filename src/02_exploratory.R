@@ -9,6 +9,7 @@ suppressPackageStartupMessages({
   library(factoextra)
   library(openxlsx)
   library(vegan)
+  library(ComplexHeatmap) # Ensure loaded for draw()
 })
 
 source("R/utils_io.R")          
@@ -52,50 +53,54 @@ if (!all(rownames(raw_matrix) %in% metadata$Patient_ID)) {
 meta_ordered <- metadata[match(rownames(raw_matrix), metadata$Patient_ID), ]
 df_raw_viz <- cbind(meta_ordered, as.data.frame(raw_matrix))
 
-# Create a temporary dataframe for plotting to preserve original data for stats.
+# Create temporary dataframe for Merged Plotting
 df_viz_merged <- df_raw_viz
-control_grp <- config$control_group  # e.g., "Healthy"
+ctrl_grp <- config$control_group 
 
-# If Group is NOT Control, rename to "Tumor"
-# (Assumes config$control_group matches exactly the string in metadata)
-df_viz_merged$Group <- ifelse(
-  df_viz_merged$Group == control_grp, 
-  control_grp, 
-  "Tumor"
+# Grouping Logic: Control vs Case
+df_viz_merged$Plot_Label <- ifelse(
+  df_viz_merged$Group == ctrl_grp, 
+  ctrl_grp, 
+  "Case" 
 )
 
-# Define a visualization palette specifically for this 2-group view
-# We use the Healthy color from config, and a generic color (e.g., SteelBlue) for Tumor
-viz_colors <- c()
-viz_colors[[control_grp]] <- my_colors[[control_grp]] 
-viz_colors[["Tumor"]] <- "#4682B4" # Manual assignment or pick from config
+# Overwrite Group column strictly for this visualization object
+df_viz_merged$Group <- df_viz_merged$Plot_Label
 
-# Handle case where control_group might be named differently in config vs data
-if (is.null(viz_colors[[control_grp]])) viz_colors[[control_grp]] <- "green4"
+# Color Assignment Logic (Dynamic)
+viz_colors <- my_colors
 
-message(sprintf("   -> Groups merged into: %s", paste(names(viz_colors), collapse = ", ")))
+# [FIX] Ensure generic Case color is available and NOT gray if possible
+if (!"Case" %in% names(viz_colors)) {
+  # Prefer the explicit config 'Case' color, otherwise fall back to the first 'cases' color
+  c_case <- if (!is.null(config$colors$Case)) config$colors$Case else config$colors$cases[1]
+  viz_colors[["Case"]] <- c_case
+}
 
-# B. Setup Output - Single PDF
+# Ensure the palette has the Control Group color explicitly
+if (!ctrl_grp %in% names(viz_colors)) {
+  viz_colors[[ctrl_grp]] <- config$colors$control
+}
+
+message(sprintf("   -> Visualization Groups: %s", paste(names(viz_colors), collapse = ", ")))
+
+# B. Output
 raw_pdf_path <- file.path(out_dir, "Distributions_Raw_Merged_Stats.pdf")
-
-# C. Generate Plots
 message(sprintf("   -> Saving plots to: %s", raw_pdf_path))
+
+hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
 
 pdf(raw_pdf_path, width = 8, height = 6) 
 
-# Loop over ALL markers
 for (marker in DATA$markers) {
-  
   if (marker %in% names(df_viz_merged)) {
-    
     p <- plot_raw_distribution_merged(
-      data_df = df_viz_merged, # Passing the merged dataframe
+      data_df = df_viz_merged, 
       marker_name = marker,
-      colors = viz_colors,     # Passing the simplified palette
-      highlight_pattern = "_LS",   
+      colors = viz_colors,     
+      highlight_pattern = hl_pattern,   
       highlight_color = "#FFD700"  
     )
-    
     if (!is.null(p)) print(p)
   }
 }
@@ -175,24 +180,83 @@ dev.off()
 message("[Viz] Generating Patient Stratification Heatmap...")
 
 # A. Prepare Data
-# We rely on 'df_global' (Z-scored) and 'safe_markers' defined earlier
 mat_heatmap_z <- as.matrix(df_global[, safe_markers])
 rownames(mat_heatmap_z) <- df_global$Patient_ID
 
-# Metadata aligned
-meta_heatmap <- df_global[, meta_cols]
+# Dynamic Metadata Selection
+target_cols <- config$viz$heatmap_metadata
+if (is.null(target_cols)) target_cols <- c("Group")
 
-# B. Output PDF
+valid_cols <- intersect(target_cols, names(df_global))
+if (length(valid_cols) == 0) valid_cols <- c("Group")
+
+meta_heatmap <- df_global[, valid_cols, drop = FALSE]
+
+# B. Smart Color Generation
+annotation_colors <- list()
+
+# Group Colors (Base Palette)
+present_groups <- unique(meta_heatmap$Group)
+group_pal <- my_colors[intersect(names(my_colors), present_groups)]
+annotation_colors[["Group"]] <- group_pal
+
+# Extra Metadata Colors (Inheritance or Highlight Logic)
+extra_cols <- setdiff(valid_cols, "Group")
+hl_pattern <- config$viz$highlight_pattern
+hl_color   <- config$colors$highlight
+
+for (col_name in extra_cols) {
+  
+  # Filter out NAs to prevent errors
+  raw_vals <- as.character(meta_heatmap[[col_name]])
+  vals <- sort(unique(raw_vals[!is.na(raw_vals)]))
+  
+  # [FIX] Initialize as character() to force Named Vector, NOT List
+  col_pal <- character()
+  
+  for (v in vals) {
+    # Priority 1: Exact match to a Group Name -> Inherit Group Color
+    if (v %in% names(group_pal)) {
+      col_pal[[v]] <- group_pal[[v]]
+      
+      # Priority 2: Contains Highlight Pattern (e.g., "_LS") -> Use Highlight Color
+    } else if (!is.null(hl_pattern) && grepl(hl_pattern, v)) {
+      col_pal[[v]] <- hl_color
+      
+      # Priority 3: Subgroup containing Parent Group Name -> Inherit Parent Color
+    } else {
+      parent_match <- NA
+      for (grp in names(group_pal)) {
+        if (grepl(grp, v)) {
+          parent_match <- grp
+          break
+        }
+      }
+      
+      if (!is.na(parent_match)) {
+        col_pal[[v]] <- group_pal[[parent_match]]
+      } else {
+        # Priority 4: Fallback
+        col_pal[[v]] <- "#D3D3D3" # LightGray
+      }
+    }
+  }
+  annotation_colors[[col_name]] <- col_pal
+}
+
+# C. Output PDF
 pdf_heat_path <- file.path(out_dir, "Heatmap_Stratification_Clustered.pdf")
-
-# Note: ComplexHeatmap draws directly to the device
 pdf(pdf_heat_path, width = 10, height = 8)
 
 tryCatch({
+  if(any(is.na(meta_heatmap))) {
+    warning("[Viz] Metadata contains NAs. Heatmap may show white spaces in annotation.")
+  }
+  
   ht_obj <- plot_stratification_heatmap(
     mat_z = mat_heatmap_z,
     metadata = meta_heatmap,
-    group_colors = my_colors,
+    annotation_colors_list = annotation_colors,
     title = "Global Clustering (Hybrid Z-Score)"
   )
   draw(ht_obj, merge_legend = TRUE)
@@ -200,7 +264,7 @@ tryCatch({
 }, error = function(e) {
   warning(paste("Heatmap generation failed:", e$message))
   plot.new()
-  text(0.5, 0.5, "Heatmap Failed (Check ComplexHeatmap installation)")
+  text(0.5, 0.5, paste("Heatmap Failed:", e$message), cex = 0.8)
 })
 
 dev.off()
@@ -213,13 +277,9 @@ wb <- createWorkbook()
 # A. Global PERMANOVA
 message("\n[Stats] Running Global PERMANOVA (All Markers)...")
 
-# [ROBUST FIX] Construct input data using the whitelist.
-# We explicitly select ONLY the Group column and the validated numeric markers.
-# This automatically drops 'Patient_ID', 'Original_Source', or any other metadata.
+# Construct input data using the whitelist.
 df_stats_global <- df_global[, c("Group", safe_markers)]
 
-# Now we run the test. 
-# metadata_cols is set to NULL because we already cleaned the data above.
 perm_global <- test_coda_permanova(
   data_input = df_stats_global, 
   group_col = "Group", 
@@ -244,9 +304,7 @@ if (length(ilr_list) > 0) {
     
     mat_ilr <- ilr_list[[grp_name]]
     
-    # [ROBUST FIX] Construct input data specifically for this group.
-    # We bind the 'Group' column from metadata directly with the numeric ILR matrix.
-    # This ensures no other metadata columns (like Original_Source) are included.
+    # Construct input data specifically for this group.
     df_stats_local <- cbind(
       metadata[, "Group", drop = FALSE], 
       as.data.frame(mat_ilr)

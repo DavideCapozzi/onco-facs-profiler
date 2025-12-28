@@ -30,25 +30,55 @@ theme_coda <- function() {
     )
 }
 
-#' @title Extract Group Colors
-#' @description Helper to get the color palette from config safely.
+#' @title Generate Dynamic Group Palette
+#' @description Maps generic config colors to specific project groups defined in control/case_groups.
 #' @param config The loaded configuration list.
 #' @return A named vector of hex codes.
 get_palette <- function(config) {
-  if (is.null(config$colors)) {
-    warning("No colors defined in config. Using defaults.")
+  
+  # 1. Defaults if config is incomplete
+  if (is.null(config$colors) || is.null(config$control_group)) {
     return(c(Control = "grey", Case = "red"))
   }
-  return(unlist(config$colors))
+  
+  # [FIX] Initialize as character vector to prevent list creation on assignment
+  final_palette <- character()
+  
+  # 2. Assign Control Color
+  ctrl_name <- config$control_group
+  ctrl_color <- if(!is.null(config$colors$control)) config$colors$control else "#2E8B57"
+  final_palette[[ctrl_name]] <- ctrl_color
+  
+  # 3. Assign Case Colors
+  case_names <- config$case_groups
+  case_colors <- if(!is.null(config$colors$cases)) config$colors$cases else c("#CD5C5C", "#4682B4")
+  
+  if (length(case_names) > 0) {
+    # Interpolate if we have more groups than defined colors
+    if (length(case_colors) < length(case_names)) {
+      pal_func <- colorRampPalette(case_colors)
+      case_colors <- pal_func(length(case_names))
+    }
+    
+    # Map colors to Case Group Names
+    for (i in seq_along(case_names)) {
+      grp_name <- case_names[i]
+      final_palette[[grp_name]] <- case_colors[i]
+    }
+  }
+  
+  # 4. Ensure generic "Case" key exists (for merged plots)
+  if (!("Case" %in% names(final_palette))) {
+    final_palette[["Case"]] <- if(!is.null(config$colors$Case)) config$colors$Case else "#CD5C5C"
+  }
+  
+  return(final_palette)
 }
-
-# R/modules_viz.R
 
 #' @title Plot Merged Raw Distribution with Highlights & Stats
 #' @description 
 #' Visualizes raw marker distribution.
 #' Features: Violin (density), Jitter (points), Mean (Dashed Red), Median (Solid Black).
-#' 
 #' @param data_df Dataframe containing 'Group', metadata columns, and the marker.
 #' @param marker_name Name of the marker column to plot.
 #' @param colors Named vector of colors for the Groups.
@@ -138,7 +168,6 @@ run_coda_pca <- function(data_matrix) {
   
   # Run PCA
   # scale.unit = FALSE is crucial for CLR data to preserve Aitchison geometry.
-  # If TRUE, we emphasize correlations but lose information on magnitude variability.
   res_pca <- FactoMineR::PCA(data_matrix, scale.unit = FALSE, graph = FALSE)
   
   return(res_pca)
@@ -170,7 +199,7 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
   # 2. Logic for Highlights
   # Default state: No Highlight
   plot_data$Highlight_Type <- "Standard"
-  plot_data$Stroke_Size <- 0.5 # Default thickness
+  plot_data$Stroke_Size <- 0.5 
   
   # Identify the column to search
   target_col <- names(metadata)[grepl(find_col_keyword, names(metadata), ignore.case = TRUE)][1]
@@ -187,7 +216,7 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
       
       if (any(to_update)) {
         plot_data$Highlight_Type[to_update] <- pattern 
-        plot_data$Stroke_Size[to_update] <- 2.0  # Thicker border for highlights
+        plot_data$Stroke_Size[to_update] <- 2.0  
       }
     }
   }
@@ -209,8 +238,7 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray80") +
     stat_ellipse(geom = "polygon", alpha = 0.1, show.legend = FALSE, level = 0.95) +
     
-    # Points with dynamic aesthetics
-    # Mapping stroke directly to the numeric column
+    # Points 
     geom_point(aes(color = Highlight_Type, stroke = Stroke_Size), 
                size = 3.5, shape = 21) +
     
@@ -219,8 +247,6 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
     
     # Border Colors (Highlights)
     scale_color_manual(name = "Subgroup", values = border_colors) +
-    
-    # [FIX] Use Identity Scale for continuous numeric values (0.5 and 2.0)
     scale_continuous_identity(aesthetics = "stroke") +
     
     labs(
@@ -242,149 +268,6 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
   
   return(p)
 }
-#' @title Plot Multivariate Normality (QQ Plot)
-#' @description 
-#' Plots squared Mahalanobis distances against Chi-Square quantiles.
-#' A straight line indicates Multivariate Normality.
-#' 
-#' @param assumption_res Result list from check_manova_assumptions().
-#' @return A ggplot object.
-plot_mvn_check <- function(assumption_res) {
-  
-  if (is.null(assumption_res$mahalanobis_dist)) {
-    # Fallback if N < P
-    return(ggplot() + 
-             annotate("text", x=1, y=1, label="N < P: MVN Plot Unavailable") + 
-             theme_void())
-  }
-  
-  d2 <- sort(assumption_res$mahalanobis_dist)
-  n <- length(d2)
-  p <- length(d2) # Note: df for chi-sq is dimensions of data? No, it's cols of matrix.
-  # We need the original dimensions to calculate df. 
-  # However, assumption_res doesn't store p. We can infer p roughly or pass it.
-  # Let's rely on the plotting logic:
-  
-  # Theoretical Quantiles (Chi-Square)
-  # We assume the user passed the correct object. 
-  # Actually, let's recalculate p inside the function if possible, 
-  # or update check_manova_assumptions to return 'df'.
-  
-  # FIX: To make this robust, let's just plot Observed vs Expected quantiles
-  # ppoints generates probability points
-  chi_sq_quantiles <- qchisq(ppoints(n), df = mean(d2)) # Estimating df from mean(d2) ~ p is a rough proxy
-  # Better: Pass 'df' in the results object. 
-  
-  plot_df <- data.frame(
-    Theoretical = chi_sq_quantiles,
-    Observed = d2
-  )
-  
-  ggplot(plot_df, aes(x = Theoretical, y = Observed)) +
-    geom_point(alpha = 0.6) +
-    geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
-    labs(
-      title = "Multivariate Normality Check",
-      subtitle = "QQ Plot of Mahalanobis Distances (Assumption: Linear = Normal)",
-      x = "Theoretical Quantiles (Chi-Square)",
-      y = "Observed Squared Mahalanobis Distance"
-    ) +
-    theme_coda()
-}
-
-#' @title Plot Homogeneity of Variances
-#' @description 
-#' Boxplot of distances to group centroids. Checks if one group is more variable than another.
-#' 
-#' @param assumption_res Result list from check_manova_assumptions().
-#' @param colors Named vector of colors.
-#' @return A ggplot object.
-plot_homogeneity <- function(assumption_res, colors) {
-  
-  df <- data.frame(
-    Group = assumption_res$groups,
-    Distance = assumption_res$dispersions
-  )
-  
-  pval <- assumption_res$homogeneity_pval
-  subtitle_txt <- sprintf("Betadisper p-value = %.4f (p < 0.05 implies unequal spread)", pval)
-  
-  ggplot(df, aes(x = Group, y = Distance, fill = Group)) +
-    geom_boxplot(alpha = 0.7, outlier.shape = NA) +
-    geom_jitter(width = 0.2, size = 1.5, alpha = 0.6) +
-    scale_fill_manual(values = colors) +
-    labs(
-      title = "Homogeneity of Multivariate Dispersion",
-      subtitle = subtitle_txt,
-      y = "Distance to Group Centroid",
-      x = NULL
-    ) +
-    theme_coda() +
-    theme(legend.position = "none")
-}
-
-#' @title Plot MANOVA Separation (Canonical Variate)
-#' @description 
-#' Visualizes the result of the MANOVA by plotting the first Canonical Variate 
-#' (Linear Discriminant), which represents the axis of maximal group separation.
-#' 
-#' @param manova_result The list returned by run_coda_manova().
-#' @param colors Named vector of group colors.
-#' @return A ggplot object (Boxplot + Jitter).
-plot_manova_results <- function(manova_result, colors) {
-  
-  df <- manova_result$plot_data
-  pval <- manova_result$p_value
-  stat <- manova_result$pillai_stat
-  
-  # Format p-value for title
-  pval_str <- ifelse(pval < 0.001, "p < 0.001", sprintf("p = %.4f", pval))
-  
-  ggplot(df, aes(x = Group, y = Canonical_Variate_1, fill = Group)) +
-    geom_boxplot(alpha = 0.6, outlier.shape = NA) +
-    geom_jitter(width = 0.2, size = 2, shape = 21, color = "black", alpha = 0.8) +
-    scale_fill_manual(values = colors) +
-    labs(
-      title = "Global Compositional Difference (MANOVA)",
-      subtitle = sprintf("Statistic: Pillai = %.2f | Significance: %s", stat, pval_str),
-      y = "Canonical Variate 1 (Best Separation Axis)",
-      x = NULL
-    ) +
-    theme_coda() +
-    theme(legend.position = "none")
-}
-
-#' @title Plot MANOVA Loadings (Feature Importance)
-#' @description 
-#' Visualizes which markers drive the separation detected by MANOVA.
-#' Markers are ranked by their correlation with the Canonical Variate.
-#' 
-#' @param manova_result The list returned by run_coda_manova().
-#' @param top_n Number of top markers to show (default 15).
-#' @return A ggplot object (Lollipop chart).
-plot_manova_loadings <- function(manova_result, top_n = 15) {
-  
-  # Get top N markers by absolute loading
-  df <- manova_result$loadings %>%
-    head(top_n)
-  
-  # Determine direction (just for coloring)
-  df$Direction <- ifelse(df$Loading > 0, "Positive", "Negative")
-  
-  ggplot(df, aes(x = Loading, y = reorder(Marker, Loading))) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-    geom_segment(aes(yend = Marker, xend = 0, color = Direction), size = 1) +
-    geom_point(aes(color = Direction), size = 3) +
-    labs(
-      title = "Drivers of Separation (MANOVA Loadings)",
-      subtitle = "Correlations between CLR Markers and Canonical Variate 1",
-      x = "Contribution to Separation (Correlation)",
-      y = NULL,
-      color = "Direction"
-    ) +
-    theme_coda() +
-    theme(legend.position = "none")
-}
 
 #' @title Variable Contribution Plot
 #' @description Wraps fviz_pca_var for consistent styling.
@@ -400,60 +283,32 @@ plot_pca_variables <- function(pca_res) {
 #' @title Plot Stratification Heatmap (ComplexHeatmap)
 #' @description 
 #' Generates a clustered heatmap using Z-scored data.
-#' Transposes the matrix to have Markers as Rows and Patients as Columns.
-#' 
 #' @param mat_z A Z-scored numeric matrix (Samples x Markers).
 #' @param metadata Dataframe containing patient metadata (aligned with mat_z rows).
-#' @param group_colors Named vector of colors for the primary group.
+#' @param annotation_colors_list A named list of color vectors for annotations.
 #' @param title Plot title.
 #' @return A ComplexHeatmap object (drawn).
-plot_stratification_heatmap <- function(mat_z, metadata, group_colors, title = "Stratification") {
+plot_stratification_heatmap <- function(mat_z, metadata, annotation_colors_list, title = "Stratification") {
   
-  # 1. Prepare Data: Transpose so Samples are Columns (Bioinformatics standard)
-  # Input: Samples x Markers -> Output: Markers x Samples
+  # 1. Prepare Data
   mat_plot <- t(mat_z)
   
-  # 2. Setup Annotations (Top Bar)
-  # Ensure metadata matches matrix order
   if (!all(rownames(mat_z) == metadata$Patient_ID)) {
     stop("Mismatch between matrix rownames and metadata Patient_ID")
   }
   
-  # Create Annotation Object
-  # We annotate Group and potentially the Subgroup (Original_Source)
+  # [FIX] Ensure metadata is a pure data.frame (not tibble) for HeatmapAnnotation
+  metadata_clean <- as.data.frame(metadata)
   
-  # Identify Subgroup column dynamically
-  sub_col <- names(metadata)[grepl("Original|Source", names(metadata), ignore.case = TRUE)][1]
-  
-  annot_df <- data.frame(Group = metadata$Group)
-  
-  # Define annotation colors
-  annot_cols <- list(Group = group_colors)
-  
-  # Add Subgroup if exists
-  if (!is.na(sub_col)) {
-    annot_df[[sub_col]] <- metadata[[sub_col]]
-    
-    # Generate random distinct colors for subgroups if not provided
-    n_subs <- length(unique(metadata[[sub_col]]))
-    if (n_subs > 0) {
-      sub_colors <- structure(
-        circlize::rand_color(n_subs, luminosity = "bright"), 
-        names = unique(metadata[[sub_col]])
-      )
-      annot_cols[[sub_col]] <- sub_colors
-    }
-  }
-  
+  # 2. Setup Annotations
   ha <- HeatmapAnnotation(
-    df = annot_df,
-    col = annot_cols,
+    df = metadata_clean,
+    col = annotation_colors_list,
     simple_anno_size = unit(0.3, "cm"),
     show_annotation_name = TRUE
   )
   
   # 3. Define Color Map for Z-Scores
-  # Blue (-2) -> White (0) -> Red (+2) is standard for standardized data
   col_fun <- colorRamp2(c(-2, 0, 2), c("#2166AC", "#F7F7F7", "#B2182B"))
   
   # 4. Draw Heatmap
@@ -476,7 +331,7 @@ plot_stratification_heatmap <- function(mat_z, metadata, group_colors, title = "
     # Aesthetics
     row_names_gp = gpar(fontsize = 8),
     column_names_gp = gpar(fontsize = 6),
-    show_column_names = FALSE, # Hide Patient IDs if too many
+    show_column_names = FALSE, 
     row_dend_width = unit(2, "cm"),
     column_dend_height = unit(2, "cm"),
     
@@ -489,14 +344,7 @@ plot_stratification_heatmap <- function(mat_z, metadata, group_colors, title = "
 
 #' @title Plot Network Graph (ggraph)
 #' @description 
-#' @param min_cor Minimum absolute partial correlation to visualize (default 0).
-#' Visualizes the inferred network. Nodes are sized by Degree. 
-#' Edges are colored by sign (Blue=Pos, Red=Neg).
-#' @param adj_mat Binary adjacency matrix.
-#' @param weight_mat Partial correlation matrix.
-#' @param title Plot title.
-#' @param layout_type ggraph layout (default: "nicely", others: "fr", "kk").
-#' @return A ggplot/ggraph object.
+#' Visualizes the inferred network.
 plot_network_structure <- function(adj_mat, weight_mat, title = "Network", 
                                    layout_type = "nicely", min_cor = 0) { 
   
@@ -506,7 +354,7 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
   # Add attributes
   E(g)$weight_raw <- NA
   E(g)$sign <- NA
-  E(g)$weight <- NA # Initialize
+  E(g)$weight <- NA 
   
   # Get edges
   el <- igraph::as_data_frame(g, what = "edges")
@@ -514,12 +362,11 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
   if (nrow(el) > 0) {
     weights <- numeric(nrow(el))
     signs   <- character(nrow(el))
-    keep_edge <- logical(nrow(el)) # Track edges to keep
+    keep_edge <- logical(nrow(el)) 
     
     for(k in 1:nrow(el)) {
       w <- weight_mat[el[k,1], el[k,2]]
       
-      # Check threshold
       if (abs(w) >= min_cor) {
         keep_edge[k] <- TRUE
         weights[k] <- abs(w)
@@ -529,24 +376,16 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
       }
     }
     
-    # Prune edges from graph object directly
-    # edges to delete are those where keep_edge is FALSE
     edges_to_remove <- E(g)[!keep_edge]
     g <- delete_edges(g, edges_to_remove)
     
-    # Update attributes for REMAINING edges
     if (ecount(g) > 0) {
       E(g)$weight <- weights[keep_edge]
       E(g)$sign   <- signs[keep_edge]
     }
   }
   
-  
-  # This ensures node size reflects the *visible* network, not the full statistical network
   V(g)$degree <- igraph::degree(g)
-  
-  # Optional: Remove isolated nodes if they have 0 degree after filtering?
-  # For now, we keep them so you can see which nodes are present but disconnected.
   
   # 2. Plotting (Standard ggraph logic)
   tg <- tidygraph::as_tbl_graph(g)
@@ -561,7 +400,6 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
     
     scale_size_continuous(range = c(2, 8)) +
     labs(title = title, 
-         # Update subtitle to reflect threshold
          subtitle = sprintf("Nodes: %d | Edges: %d (Filter: |rho| > %.2f)", 
                             vcount(g), ecount(g), min_cor),
          edge_color = "Association") +

@@ -2,34 +2,30 @@
 # PROJECT CONFIGURATION: CLR Network Inference
 # ==============================================================================
 
-project_name: "longsurvivors"
-#project_name: "immunerange"
-
-# --- File Paths ---
-# Use absolute paths or relative to project root
-input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
-#input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
+# --- Setup ---
 
 output_root: "results"
 
-# --- Groups & Cohorts ---
-cohorts:
-  NSCLC: "NSCLC"
-  HNSCC: "HNSCC"
-  Healthy: "Healthy_Donors"
-
-# Analysis Groupings
-control_group: "Healthy"
-case_groups: ["NSCLC", "HNSCC"]
-
-# # cohorts:
+#project_name: "longsurvivors"
+#input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
 # cohorts:
-#   DS_Duraclone: "DS_Duraclone"
-#   Healthy: "DS_Chiara"
+#   NSCLC: "NSCLC"
+#   HNSCC: "HNSCC"
+#   Healthy: "Healthy_Donors"
 
 # # Analysis Groupings
 # control_group: "Healthy"
-# case_groups: ["DS_Duraclone"]
+# case_groups: ["NSCLC", "HNSCC"]
+
+project_name: "immunerange"
+input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
+cohorts:
+  DS_Duraclone: "DS_Duraclone"
+  Healthy: "DS_Chiara"
+
+# Analysis Groupings
+control_group: "Healthy"
+case_groups: ["DS_Duraclone"]
 
 marker_selection:
   whitelist: []      
@@ -46,13 +42,14 @@ metadata:
   
 # --- Visuals ---
 colors:
-  Healthy: "#2E8B57"  # SeaGreen
-  NSCLC: "#4682B4"    # SteelBlue
-  HNSCC: "#CD5C5C"    # IndianRed
-  DS_Duraclone: "#4682B4" 
-
+  control: "#2E8B57"         # SeaGreen (assigned to control_group)
+  cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] # Assigned to case_groups in order
+  highlight: "#FFD700"       # Gold (for subgroups matching highlight_pattern)
+  Case: "#CD5C5C"           # Indian red Fallback
 viz:
   min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
+  heatmap_metadata: ["Group", "Original_Source"]
+  highlight_pattern: "_LS"
 
 # --- Quality Control ---
 qc:
