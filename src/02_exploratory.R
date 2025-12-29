@@ -9,7 +9,7 @@ suppressPackageStartupMessages({
   library(factoextra)
   library(openxlsx)
   library(vegan)
-  library(ComplexHeatmap) # Ensure loaded for draw()
+  library(ComplexHeatmap) 
 })
 
 source("R/utils_io.R")          
@@ -57,11 +57,14 @@ df_raw_viz <- cbind(meta_ordered, as.data.frame(raw_matrix))
 df_viz_merged <- df_raw_viz
 ctrl_grp <- config$control_group 
 
-# Grouping Logic: Control vs Case
+# Instead of static "Case", combine all case group names (e.g., "GroupA + GroupB")
+case_label_str <- paste(config$case_groups, collapse = " + ")
+
+# Grouping Logic: Control vs Combined Case Label
 df_viz_merged$Plot_Label <- ifelse(
   df_viz_merged$Group == ctrl_grp, 
   ctrl_grp, 
-  "Case" 
+  case_label_str 
 )
 
 # Overwrite Group column strictly for this visualization object
@@ -70,12 +73,12 @@ df_viz_merged$Group <- df_viz_merged$Plot_Label
 # Color Assignment Logic (Dynamic)
 viz_colors <- my_colors
 
-# [FIX] Ensure generic Case color is available and NOT gray if possible
-if (!"Case" %in% names(viz_colors)) {
-  # Prefer the explicit config 'Case' color, otherwise fall back to the first 'cases' color
-  c_case <- if (!is.null(config$colors$Case)) config$colors$Case else config$colors$cases[1]
-  viz_colors[["Case"]] <- c_case
-}
+# Ensure the new combined label maps to the generic Case color
+# Retrieve the generic 'Case' color (from config or fallback to first case color)
+c_case <- if (!is.null(config$colors$Case)) config$colors$Case else config$colors$cases[1]
+
+# Assign this color to the new dynamic label key
+viz_colors[[case_label_str]] <- c_case
 
 # Ensure the palette has the Control Group color explicitly
 if (!ctrl_grp %in% names(viz_colors)) {

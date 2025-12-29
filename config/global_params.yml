@@ -6,26 +6,24 @@
 
 output_root: "results"
 
-#project_name: "longsurvivors"
-#input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
-# cohorts:
-#   NSCLC: "NSCLC"
-#   HNSCC: "HNSCC"
-#   Healthy: "Healthy_Donors"
-
-# # Analysis Groupings
-# control_group: "Healthy"
-# case_groups: ["NSCLC", "HNSCC"]
-
-project_name: "immunerange"
-input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
+project_name: "longsurvivors"
+input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
 cohorts:
-  DS_Duraclone: "DS_Duraclone"
-  Healthy: "DS_Chiara"
-
+  NSCLC: "NSCLC"
+  HNSCC: "HNSCC"
+  Healthy: "Healthy_Donors"
 # Analysis Groupings
 control_group: "Healthy"
-case_groups: ["DS_Duraclone"]
+case_groups: ["NSCLC", "HNSCC"]
+
+# project_name: "immunerange"
+# input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
+# cohorts:
+#   DS_Duraclone: "DS_Duraclone"
+#   Healthy: "DS_Chiara"
+# # Analysis Groupings
+# control_group: "Healthy"
+# case_groups: ["DS_Duraclone"]
 
 marker_selection:
   whitelist: []      
