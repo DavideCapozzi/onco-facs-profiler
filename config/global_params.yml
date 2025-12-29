@@ -47,6 +47,7 @@ colors:
 viz:
   min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
   heatmap_metadata: ["Group", "Original_Source"]
+  merge_case_groups: false
   highlight_pattern: "_LS"
 
 # --- Quality Control ---

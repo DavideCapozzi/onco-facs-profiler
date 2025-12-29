@@ -53,39 +53,41 @@ if (!all(rownames(raw_matrix) %in% metadata$Patient_ID)) {
 meta_ordered <- metadata[match(rownames(raw_matrix), metadata$Patient_ID), ]
 df_raw_viz <- cbind(meta_ordered, as.data.frame(raw_matrix))
 
-# Create temporary dataframe for Merged Plotting
+# Initialize with distinct groups (default state)
 df_viz_merged <- df_raw_viz
+viz_colors <- my_colors
 ctrl_grp <- config$control_group 
 
-# Instead of static "Case", combine all case group names (e.g., "GroupA + GroupB")
-case_label_str <- paste(config$case_groups, collapse = " + ")
+# Check configuration for merging strategy
+should_merge <- if (!is.null(config$viz$merge_case_groups)) config$viz$merge_case_groups else FALSE
 
-# Grouping Logic: Control vs Combined Case Label
-df_viz_merged$Plot_Label <- ifelse(
-  df_viz_merged$Group == ctrl_grp, 
-  ctrl_grp, 
-  case_label_str 
-)
-
-# Overwrite Group column strictly for this visualization object
-df_viz_merged$Group <- df_viz_merged$Plot_Label
-
-# Color Assignment Logic (Dynamic)
-viz_colors <- my_colors
-
-# Ensure the new combined label maps to the generic Case color
-# Retrieve the generic 'Case' color (from config or fallback to first case color)
-c_case <- if (!is.null(config$colors$Case)) config$colors$Case else config$colors$cases[1]
-
-# Assign this color to the new dynamic label key
-viz_colors[[case_label_str]] <- c_case
-
-# Ensure the palette has the Control Group color explicitly
-if (!ctrl_grp %in% names(viz_colors)) {
+if (should_merge) {
+  # Combine all case group names (e.g., "GroupA + GroupB")
+  case_label_str <- paste(config$case_groups, collapse = " + ")
+  
+  # Update Group Label: Control vs Combined Cases
+  df_viz_merged$Plot_Label <- ifelse(
+    df_viz_merged$Group == ctrl_grp, 
+    ctrl_grp, 
+    case_label_str 
+  )
+  df_viz_merged$Group <- df_viz_merged$Plot_Label
+  
+  # Update Color Palette for the new labels
+  # Retrieve generic 'Case' color (fallback to first case color if generic not defined)
+  c_case <- if (!is.null(config$colors$Case)) config$colors$Case else config$colors$cases[1]
+  
+  # Reset colors to match the new merged keys
+  viz_colors <- character()
   viz_colors[[ctrl_grp]] <- config$colors$control
+  viz_colors[[case_label_str]] <- c_case
+  
+  message(sprintf("   -> Visualization: Merged View (%s vs %s)", ctrl_grp, case_label_str))
+  
+} else {
+  # Keep original Groups and Palette
+  message(sprintf("   -> Visualization: Distinct Groups (%s)", paste(names(viz_colors), collapse = ", ")))
 }
-
-message(sprintf("   -> Visualization Groups: %s", paste(names(viz_colors), collapse = ", ")))
 
 # B. Output
 raw_pdf_path <- file.path(out_dir, "Distributions_Raw_Merged_Stats.pdf")
