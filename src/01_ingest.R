@@ -65,22 +65,74 @@ out_dir <- file.path(config$output_root, "01_QC")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 save_qc_report(qc_summary, file.path(out_dir, "QC_Filtering_Report.xlsx"))
 
-# 4. Hybrid Transformation Logic & Normalization
+# 4. Hybrid Transformation Logic & Zero Handling
 # ------------------------------------------------------------------------------
 message("\n[Transform] Starting Configuration-Driven Hybrid Strategy...")
 
-mat_no_zeros <- coda_replace_zeros(mat_raw) 
-mat_imputed  <- impute_nas_simple(mat_no_zeros)
+# Identify Marker Types based on Config
+all_current_markers <- colnames(mat_raw)
+comp_markers_list <- unique(unlist(config$hybrid_groups))
+comp_markers <- intersect(all_current_markers, comp_markers_list)
+func_markers <- setdiff(all_current_markers, comp_markers)
 
-# A. Global Zero/NA Handling (Already done above via QC/Imputation logic)
-if (!exists("mat_imputed")) stop("mat_imputed missing.")
+message(sprintf("   [Strategy] Split Imputation: %d Compositional (CZM) vs %d Functional (LOD-proxy)", 
+                length(comp_markers), length(func_markers)))
 
-# B. Split & Transform based on Config
+# --- A. Compositional Imputation (CZM) ---
+# Applies only to markers defined in hybrid_groups to preserve sub-compositional geometry
+if (length(comp_markers) > 0) {
+  mat_comp_raw <- mat_raw[, comp_markers, drop = FALSE]
+  # coda_replace_zeros uses zCompositions::cmultRepl internally
+  mat_comp_imp <- coda_replace_zeros(mat_comp_raw)
+} else {
+  mat_comp_imp <- matrix(0, nrow = nrow(mat_raw), ncol = 0)
+}
+
+# --- B. Functional Imputation (Adaptive Min/2) ---
+# Applies to independent functional markers. Replaces 0 with half the minimum positive value per marker.
+# This mimics the Limit of Detection (LOD) without enforcing compositional constraints.
+if (length(func_markers) > 0) {
+  mat_func_raw <- mat_raw[, func_markers, drop = FALSE]
+  mat_func_imp <- mat_func_raw
+  
+  for (j in 1:ncol(mat_func_imp)) {
+    col_vals <- mat_func_imp[, j]
+    # Identify zeros that are NOT NAs
+    zero_idx <- which(col_vals == 0 & !is.na(col_vals))
+    
+    if (length(zero_idx) > 0) {
+      # Calculate adaptive LOD: Half of the minimum positive value
+      pos_vals <- col_vals[col_vals > 0 & !is.na(col_vals)]
+      
+      if (length(pos_vals) > 0) {
+        lod_proxy <- min(pos_vals) / 2
+        mat_func_imp[zero_idx, j] <- lod_proxy
+      } else {
+        # Fallback if column is all zeros (should be caught by QC, but purely defensive)
+        mat_func_imp[zero_idx, j] <- 1e-6
+      }
+    }
+  }
+} else {
+  mat_func_imp <- matrix(0, nrow = nrow(mat_raw), ncol = 0)
+}
+
+# --- C. Merge & Finalize Imputation ---
+# Recombine matrices and handle any remaining true NAs (missing data)
+mat_merged <- cbind(mat_comp_imp, mat_func_imp)
+# Restore original column order for consistency
+mat_merged <- mat_merged[, all_current_markers, drop = FALSE]
+
+# Impute genuine NAs (not zeros) that might remain
+mat_imputed <- impute_nas_simple(mat_merged)
+
+# 5. Transformation (CLR & Logit)
+# ------------------------------------------------------------------------------
 all_markers <- colnames(mat_imputed)
 transformed_list <- list()
 assigned_markers <- c()
 
-# Loop through Compositional Groups defined in Config
+# A. Process Compositional Groups (CLR)
 for (group_name in names(config$hybrid_groups)) {
   
   requested_mks <- config$hybrid_groups[[group_name]]
@@ -106,18 +158,19 @@ for (group_name in names(config$hybrid_groups)) {
   assigned_markers <- c(assigned_markers, present_mks)
 }
 
-# C. Process Functional/Remaining Markers (Logit)
+# B. Process Functional/Remaining Markers (Logit)
+# Note: These have been zero-imputed via Min/2 strategy above, suitable for Logit.
 unassigned_markers <- setdiff(all_markers, assigned_markers)
 
 if (length(unassigned_markers) > 0) {
-  message(sprintf("   [Group: Functional/Other] %d markers -> Applying Log1p", length(unassigned_markers)))
+  message(sprintf("   [Group: Functional/Other] %d markers -> Applying Logit", length(unassigned_markers)))
   mat_sub <- mat_imputed[, unassigned_markers, drop = FALSE]
   mat_trans <- coda_transform_logit(mat_sub)
   
   transformed_list[["Functional"]] <- mat_trans
 }
 
-# 5. Reconstruct & Normalization
+# 6. Reconstruct & Normalization
 # ------------------------------------------------------------------------------
 # A. Merge pieces
 mat_hybrid_tmp <- do.call(cbind, transformed_list)
@@ -141,9 +194,8 @@ mat_hybrid_z <- as.matrix(mat_hybrid_z)
 ilr_list <- coda_compute_local_ilr(mat_imputed, config$hybrid_groups)
 
 
-# 6. Save Output
+# 7. Save Output
 # ------------------------------------------------------------------------------
-# We save both versions of the matrix for downstream flexibility
 df_hybrid_raw <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_raw))
 df_hybrid_z   <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_z))
 
