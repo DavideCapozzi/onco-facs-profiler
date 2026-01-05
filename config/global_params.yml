@@ -65,5 +65,5 @@ stats:
   n_boot: 1000        # Bootstrap iterations
   n_perm: 2000        # Permutation iterations
   alpha: 0.05         # Significance level
-  fdr_threshold: 0.05 # BH Correction
+  fdr_threshold: 0.1 # BH Correction
   n_cores: "auto"     # "auto" uses detectCores() - 1
