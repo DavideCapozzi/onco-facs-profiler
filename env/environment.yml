@@ -11,7 +11,7 @@ dependencies:
   # === BASE R ===
   - r-base=4.3.*
   
-  # === CONFIGURATION & IO (ADDED) ===
+  # === CONFIGURATION & IO ===
   - r-yaml             
   - r-readxl           
 
@@ -54,14 +54,17 @@ dependencies:
   - bioconductor-sva          
   - r-mice                    
 
-  # === NETWORK ANALYSIS & ROBUST STATISTICS (UPDATED) ===
+  # === DIMENSIONALITY REDUCTION ===
+  - bioconductor-pcamethods
+
+  # === NETWORK ANALYSIS & ROBUST STATISTICS ===
   - r-igraph>=2.0
   - r-tidygraph
   - r-corpcor         
   - r-huge            
   - r-pulsar         
 
-  # === PARALLEL COMPUTING (ADDED) ===
+  # === PARALLEL COMPUTING ===
   - r-doparallel       
   - r-foreach          
 
