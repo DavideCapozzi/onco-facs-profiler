@@ -14,6 +14,12 @@ library(stats)
 #' CRITICAL: 'raw_parts_mat' must be RAW percentages/counts, not already transformed data.
 decode_ilr_to_clr <- function(ilr_mat, raw_parts_mat, p_threshold = 0.05) {
   
+  # 0. Validation (Strict Identity Check)
+  if (!identical(rownames(ilr_mat), rownames(raw_parts_mat))) {
+    warning("[Decoder] Rownames do not match exactly! Correlations would be meaningless. Stopping.")
+    return(data.frame())
+  }
+  
   # Validation
   if(nrow(ilr_mat) != nrow(raw_parts_mat)) {
     warning("[Decoder] Row mismatch between ILR and Raw data. Skipping.")

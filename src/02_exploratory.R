@@ -364,33 +364,43 @@ if (length(ilr_list) > 0) {
     addWorksheet(wb, sheet_name)
     writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
     
-    # 2. ILR DECODING (Corrected Logic)
-    if (pval < 0.1) { 
-      message(sprintf("      [Decoder] Decoding balances for '%s'...", grp_name))
-      
+    # 2. ILR DECODING 
+    if (pval < 0.1) {
       target_mks <- config$hybrid_groups[[grp_name]]
-      
-      # FIX: Use RAW_MATRIX (Percentage/Counts) not hybrid transformed data
-      # We verify intersection with available raw markers
       valid_mks <- intersect(target_mks, colnames(raw_matrix))
       
       if(length(valid_mks) > 1) {
-        # Subset raw data for this group
+        message(sprintf("      [Decoder] Decoding balances for '%s'...", grp_name))
+        
+        # A. Subset Raw Matrix for Markers
         raw_parts_subset <- raw_matrix[, valid_mks, drop = FALSE]
         
-        # Ensure we align rows with the ILR matrix (handling potential drops in Step 1)
-        # ILR matrix rows are already aligned with DATA$metadata$Patient_ID
-        # We need to match raw_matrix rows to mat_ilr rows
-        common_ids <- rownames(mat_ilr)
-        raw_parts_subset <- raw_parts_subset[common_ids, , drop = FALSE]
+        # B. Find Common Patients (INTERSECTION) 
+        ids_ilr <- rownames(mat_ilr)
+        ids_raw <- rownames(raw_parts_subset)
+        common_ids <- intersect(ids_ilr, ids_raw)
         
-        decoding_table <- decode_ilr_to_clr(mat_ilr, raw_parts_subset)
+        # Check if we have enough matching patients
+        if (length(common_ids) < 3) {
+          warning(sprintf("      [Skip] Not enough matching patients for %s decoder.", grp_name))
+          next
+        }
         
-        decode_sheet <- substr(paste0("Dec_", grp_name), 1, 31)
-        addWorksheet(wb, decode_sheet)
-        writeData(wb, decode_sheet, decoding_table)
+        # C. Align Both Matrices perfectly
+        # Subset using the safe intersection list
+        mat_ilr_safe <- mat_ilr[common_ids, , drop = FALSE]
+        raw_parts_safe <- raw_parts_subset[common_ids, , drop = FALSE]
+        
+        # D. Run Decoder
+        decoding_table <- decode_ilr_to_clr(mat_ilr_safe, raw_parts_safe)
+        
+        if (nrow(decoding_table) > 0) {
+          decode_sheet <- substr(paste0("Dec_", grp_name), 1, 31)
+          addWorksheet(wb, decode_sheet)
+          writeData(wb, decode_sheet, decoding_table)
+        }
       } else {
-        warning(sprintf("Cannot decode %s: Markers missing in raw matrix.", grp_name))
+        message(sprintf("      [Skip] Markers for '%s' not present in raw matrix.", grp_name))
       }
     }
   }
