@@ -10,11 +10,14 @@ suppressPackageStartupMessages({
   library(openxlsx)
   library(vegan)
   library(ComplexHeatmap) 
+  library(mixOmics)
 })
 
 source("R/utils_io.R")          
 source("R/modules_hypothesis.R") 
 source("R/modules_viz.R")
+source("R/modules_multivariate.R")   
+source("R/modules_interpretation.R") 
 
 message("\n=== PIPELINE STEP 2: EXPLORATORY & STATS (Hybrid/Z-Score) ===")
 
@@ -275,33 +278,65 @@ tryCatch({
 dev.off()
 message(sprintf("   -> Heatmap saved to: %s", pdf_heat_path))
 
-# 5. Statistical Testing
+# 5. Statistical Testing & Advanced Interpretation
 # ------------------------------------------------------------------------------
 wb <- createWorkbook()
 
-# A. Global PERMANOVA
-message("\n[Stats] Running Global PERMANOVA (All Markers)...")
+# A. Global Analysis (PERMANOVA + PLS-DA)
+message("\n[Stats] Running Global PERMANOVA & Driver Analysis...")
 
-# Construct input data using the whitelist.
+# 1. PERMANOVA
 df_stats_global <- df_global[, c("Group", safe_markers)]
-
 perm_global <- test_coda_permanova(
   data_input = df_stats_global, 
   group_col = "Group", 
-  metadata_cols = NULL, 
   n_perm = config$stats$n_perm
 )
-
-message(sprintf("   -> Global p-value: %.5f (R2: %.2f%%)", 
-                perm_global$`Pr(>F)`[1], perm_global$R2[1] * 100))
-
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
+# 2. PLS-DA Driver Analysis
+if (config$multivariate$run_plsda && exists("plsda")) {
+  message("   [PLS-DA] Identifying Global Immunological Signature...")
+  
+  tryCatch({
+    X_pls <- df_global[, safe_markers]
+    meta_pls <- df_global[, meta_cols, drop=FALSE]
+    
+    # Run Model
+    pls_res <- run_plsda_model(X_pls, meta_pls, group_col = "Group", n_comp = config$multivariate$n_comp)
+    
+    # Extract Drivers
+    top_drivers <- extract_plsda_loadings(pls_res, top_n = config$multivariate$top_n_loadings)
+    
+    # Extract Performance Metrics (Quality Check)
+    perf_metrics <- extract_plsda_performance(pls_res)
+    
+    # Save Drivers
+    addWorksheet(wb, "Global_PLSDA_Drivers")
+    writeData(wb, "Global_PLSDA_Drivers", top_drivers)
+    
+    # Save Performance
+    addWorksheet(wb, "Global_PLSDA_Quality")
+    writeData(wb, "Global_PLSDA_Quality", perf_metrics)
+    
+    message(sprintf("   -> Identified %d top driver markers.", nrow(top_drivers)))
+    message(sprintf("   -> Model Error Rate (BER): %.2f%% (Lower is better)", perf_metrics$Overall_BER[1] * 100))
+    
+    # Save Plot
+    pdf(file.path(out_dir, "Global_PLSDA_Biplot.pdf"), width = 8, height = 7)
+    mixOmics::plotIndiv(pls_res$model, comp = c(1,2), group = meta_pls$Group, 
+                        ellipse = TRUE, legend = TRUE, title = "PLS-DA: Global Signature")
+    dev.off()
+    
+  }, error = function(e) {
+    warning(paste("PLS-DA Failed:", e$message))
+  })
+}
 
-# B. Local PERMANOVA (Sub-groups ILR Balances)
+# B. Local PERMANOVA + ILR Decoding
 if (length(ilr_list) > 0) {
-  message("\n[Stats] Running Local PERMANOVA on Compositional Groups (ILR)...")
+  message("\n[Stats] Running Local Analysis on Compositional Groups...")
   
   summary_local <- data.frame()
   
@@ -309,25 +344,14 @@ if (length(ilr_list) > 0) {
     
     mat_ilr <- ilr_list[[grp_name]]
     
-    # Construct input data specifically for this group.
-    df_stats_local <- cbind(
-      metadata[, "Group", drop = FALSE], 
-      as.data.frame(mat_ilr)
-    )
+    # 1. PERMANOVA
+    df_stats_local <- cbind(metadata[, "Group", drop = FALSE], as.data.frame(mat_ilr))
+    res_perm <- test_coda_permanova(df_stats_local, group_col = "Group", n_perm = config$stats$n_perm)
     
-    # Run Test
-    res_perm <- test_coda_permanova(
-      data_input = df_stats_local, 
-      group_col = "Group", 
-      metadata_cols = NULL, 
-      n_perm = config$stats$n_perm
-    )
-    
-    # Store Summary
     pval <- res_perm$`Pr(>F)`[1]
     r2   <- res_perm$R2[1]
     
-    message(sprintf("   -> Group '%s': p = %.5f", grp_name, pval))
+    message(sprintf("   -> Group '%s': p = %.5f (R2=%.1f%%)", grp_name, pval, r2 * 100))
     
     summary_local <- rbind(summary_local, data.frame(
       SubGroup = grp_name,
@@ -339,6 +363,36 @@ if (length(ilr_list) > 0) {
     sheet_name <- substr(paste0("ILR_", grp_name), 1, 31) 
     addWorksheet(wb, sheet_name)
     writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
+    
+    # 2. ILR DECODING (Corrected Logic)
+    if (pval < 0.1) { 
+      message(sprintf("      [Decoder] Decoding balances for '%s'...", grp_name))
+      
+      target_mks <- config$hybrid_groups[[grp_name]]
+      
+      # FIX: Use RAW_MATRIX (Percentage/Counts) not hybrid transformed data
+      # We verify intersection with available raw markers
+      valid_mks <- intersect(target_mks, colnames(raw_matrix))
+      
+      if(length(valid_mks) > 1) {
+        # Subset raw data for this group
+        raw_parts_subset <- raw_matrix[, valid_mks, drop = FALSE]
+        
+        # Ensure we align rows with the ILR matrix (handling potential drops in Step 1)
+        # ILR matrix rows are already aligned with DATA$metadata$Patient_ID
+        # We need to match raw_matrix rows to mat_ilr rows
+        common_ids <- rownames(mat_ilr)
+        raw_parts_subset <- raw_parts_subset[common_ids, , drop = FALSE]
+        
+        decoding_table <- decode_ilr_to_clr(mat_ilr, raw_parts_subset)
+        
+        decode_sheet <- substr(paste0("Dec_", grp_name), 1, 31)
+        addWorksheet(wb, decode_sheet)
+        writeData(wb, decode_sheet, decoding_table)
+      } else {
+        warning(sprintf("Cannot decode %s: Markers missing in raw matrix.", grp_name))
+      }
+    }
   }
   
   addWorksheet(wb, "Summary_Local_Tests")
