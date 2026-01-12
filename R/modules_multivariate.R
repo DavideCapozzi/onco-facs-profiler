@@ -1,59 +1,97 @@
 # R/modules_multivariate.R
 # ==============================================================================
-# MULTIVARIATE ANALYSIS MODULE
-# Description: Wrappers for PLS-DA and Supervised Feature Selection.
+# MULTIVARIATE ANALYSIS MODULE (sPLS-DA)
+# Description: Wrappers for Sparse PLS-DA with automatic feature tuning.
 # Dependencies: mixOmics, dplyr
 # ==============================================================================
 
 library(dplyr)
+library(mixOmics)
 
-#' @title Run PLS-DA (Partial Least Squares Discriminant Analysis)
+#' @title Run Sparse PLS-DA (sPLS-DA) with Tuning
 #' @description 
-#' Fits a supervised PLS-DA model. Includes SAFE cross-validation.
-#' If CV fails, it returns the model anyway so we don't lose the drivers.
-run_plsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2) {
+#' Fits a supervised sparse PLS-DA model.
+#' Performs automatic tuning to select the optimal number of variables (keepX)
+#' for each component using cross-validation.
+#' 
+#' @param data_z Matrix of Z-scored data (Samples x Features).
+#' @param metadata Dataframe containing metadata (must match data_z rows).
+#' @param group_col Name of the column in metadata to use as the class/Y.
+#' @param n_comp Number of components to compute (default: 2).
+#' @param validation_method CV method ("Mfold" or "loo"). 
+#' @param folds Number of folds for Mfold CV (default: 5).
+#' @return A list containing the final optimized model, performance metrics, and tuning results.
+run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2, 
+                             validation_method = "Mfold", folds = 5) {
   
-  # Assumption: mixOmics is already loaded by the main script
+  # Ensure mixOmics is loaded
+  requireNamespace("mixOmics", quietly = TRUE)
   
   Y <- as.factor(metadata[[group_col]])
   X <- as.matrix(data_z)
   
+  # Validation: Dimensions
   if (nrow(X) != length(Y)) stop("Dimension mismatch between Data and Group labels.")
   
-  message(sprintf("   [PLS-DA] Fitting model with %d components...", n_comp))
+  # Validation: Minimum samples for Mfold
+  min_samples_per_class <- min(table(Y))
+  if (validation_method == "Mfold" && min_samples_per_class < folds) {
+    message(sprintf("   [sPLS-DA] Warning: Smallest class has %d samples. Adjusting folds to %d.", 
+                    min_samples_per_class, min_samples_per_class))
+    folds <- min_samples_per_class
+  }
   
-  # 1. Run Model
-  model <- mixOmics::plsda(X, Y, ncomp = n_comp)
+  # 1. Tuning Step: Determine optimal keepX
+  message(sprintf("   [sPLS-DA] Tuning optimal features (keepX) for %d components...", n_comp))
   
-  # 2. Cross-Validation
-  # Wrap in tryCatch to prevent crashing if CV fails
-  perf_pls <- tryCatch({
-    val_method <- if(nrow(X) > 20) "Mfold" else "loo"
-    n_folds <- if(val_method == "Mfold") 5 else NULL
-    
-    # Check for too few samples for Mfold
-    min_samples <- min(table(Y))
-    if (val_method == "Mfold" && min_samples < n_folds) {
-      n_folds <- min_samples
-    }
-    
-    mixOmics::perf(model, validation = val_method, folds = n_folds, 
+  # Define grid of keepX to test: from 5 markers up to all markers
+  n_vars <- ncol(X)
+  list_keepX <- c(seq(5, min(30, n_vars), by = 5))
+  if (n_vars > 30) list_keepX <- c(list_keepX, n_vars)
+  list_keepX <- unique(list_keepX)
+  
+  # Run Tuning (tune.splsda)
+  # using nrepeat=10 for robustness in estimation
+  tune_splsda <- mixOmics::tune.splsda(
+    X = X, 
+    Y = Y, 
+    ncomp = n_comp, 
+    test.keepX = list_keepX, 
+    validation = validation_method, 
+    folds = folds, 
+    dist = "max.dist", 
+    progressBar = FALSE,
+    nrepeat = 10 
+  )
+  
+  choice_keepX <- tune_splsda$choice.keepX
+  message(sprintf("      -> Optimal keepX selected: Comp1=%d, Comp2=%d", 
+                  choice_keepX[1], choice_keepX[2]))
+  
+  # 2. Final Model Fitting
+  message("   [sPLS-DA] Fitting final sparse model with selected parameters...")
+  final_model <- mixOmics::splsda(X, Y, ncomp = n_comp, keepX = choice_keepX)
+  
+  # 3. Final Performance Evaluation (Error Rate)
+  # We wrap this in tryCatch as perf() can sometimes fail on edge cases
+  perf_splsda <- tryCatch({
+    mixOmics::perf(final_model, validation = validation_method, folds = folds, 
                    progressBar = FALSE, nrepeat = 10, auc = TRUE)
   }, error = function(e) {
-    message(paste("      [WARN] Cross-validation (BER) failed:", e$message))
+    message(paste("      [WARN] Performance evaluation failed:", e$message))
     return(NULL) 
   })
   
-  return(list(model = model, performance = perf_pls))
+  return(list(model = final_model, performance = perf_splsda, tuning = tune_splsda))
 }
 
 #' @title Extract PLS-DA Performance Metrics
-#' @description Returns BER if available, otherwise a placeholder.
+#' @description Returns BER (Balanced Error Rate) from the performance object.
 extract_plsda_performance <- function(pls_result) {
   perf <- pls_result$performance
   n_comp <- pls_result$model$ncomp
   
-  # Handle case where perf failed (NULL)
+  # Handle failure case
   if (is.null(perf)) {
     return(data.frame(
       Component = 1:n_comp,
@@ -65,10 +103,11 @@ extract_plsda_performance <- function(pls_result) {
   # Extract BER safely
   ber_vals <- rep(NA, n_comp)
   
-  # Robust extraction of BER
   tryCatch({
     if (!is.null(perf$error.rate$BER)) {
+      # Check if matrix or vector
       if (is.matrix(perf$error.rate$BER)) {
+        # Usually extract 'max.dist' distance metric for sPLS-DA
         raw_ber <- perf$error.rate$BER[, "max.dist"]
         if(length(raw_ber) >= n_comp) ber_vals <- raw_ber[1:n_comp]
       } else if (is.vector(perf$error.rate$BER)) {
@@ -79,12 +118,10 @@ extract_plsda_performance <- function(pls_result) {
     message("      [WARN] BER extraction encountered an issue. Using NAs.")
   })
   
-  # [FIXED] Ensure Validation Method handles empty vectors (length 0)
+  # Extract validation method string
   val_method <- "Unknown"
   if (!is.null(perf$validation)) {
-    if (length(perf$validation) > 0) {
-      val_method <- as.character(perf$validation)[1] # Force scalar
-    }
+    val_method <- as.character(perf$validation)[1]
   }
   
   df_perf <- data.frame(
@@ -96,28 +133,45 @@ extract_plsda_performance <- function(pls_result) {
   return(df_perf)
 }
 
-#' @title Extract Top Discriminant Features (Loadings)
-extract_plsda_loadings <- function(pls_result, top_n = 15) {
+#' @title Extract Discriminant Features (Sparse Loadings)
+#' @description 
+#' Extracts loading weights from the sPLS-DA model. 
+#' Filters out variables with zero weight (not selected by the model).
+#' 
+#' @param pls_result The list returned by run_splsda_model.
+#' @return A dataframe of non-zero loadings.
+extract_plsda_loadings <- function(pls_result) {
   model <- pls_result$model
+  
+  # Check if loadings exist
   if(is.null(model$loadings$X)) return(data.frame())
   
-  loadings_df <- data.frame(
-    Marker = rownames(model$loadings$X),
-    Comp1_Weight = model$loadings$X[, 1]
-  )
+  # Convert loadings matrix to dataframe
+  loadings_raw <- as.data.frame(model$loadings$X)
+  loadings_raw$Marker <- rownames(loadings_raw)
+  
+  # Reshape to long format or keep wide? 
+  # Strategy: Create a clean table with Comp1 and Comp2 weights
+  
+  df_clean <- loadings_raw %>%
+    dplyr::select(Marker, everything()) %>%
+    dplyr::rename(Comp1_Weight = comp1)
   
   if(model$ncomp > 1) {
-    loadings_df$Comp2_Weight <- model$loadings$X[, 2]
+    df_clean <- df_clean %>% dplyr::rename(Comp2_Weight = comp2)
   }
   
-  loadings_df$Importance <- abs(loadings_df$Comp1_Weight)
+  # Calculate Importance (Absolute weight on Comp1)
+  df_clean$Importance <- abs(df_clean$Comp1_Weight)
   
-  top_drivers <- loadings_df %>%
+  # Filter: In sPLS-DA, we only care about non-zero weights
+  # We keep rows where at least one component has a non-zero weight
+  df_clean <- df_clean %>%
+    filter(Importance > 0 | (if("Comp2_Weight" %in% names(.)) abs(Comp2_Weight) > 0 else FALSE)) %>%
     arrange(desc(Importance)) %>%
-    head(top_n) %>%
     mutate(
       Direction = ifelse(Comp1_Weight > 0, "Positive_Assoc", "Negative_Assoc")
     )
   
-  return(top_drivers)
+  return(df_clean)
 }

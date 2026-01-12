@@ -296,56 +296,66 @@ perm_global <- test_coda_permanova(
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
-# 2. PLS-DA Driver Analysis (Supervised)
+# 2. sPLS-DA Driver Analysis (Updated for Sparse Model)
 run_pls <- if(!is.null(config$multivariate$run_plsda)) config$multivariate$run_plsda else FALSE
 
 if (run_pls) {
-  message("   [PLS-DA] Identifying Global Immunological Signature...")
+  message("   [sPLS-DA] Identifying Global Immunological Signature (Sparse)...")
   
   tryCatch({
     X_pls <- df_global[, safe_markers]
     meta_pls <- df_global[, meta_cols, drop=FALSE]
     
-    # Run Model
-    pls_res <- run_plsda_model(X_pls, meta_pls, group_col = "Group", 
-                               n_comp = config$multivariate$n_comp)
+    # Run Model (using the NEW sparse function)
+    # We pass 5 folds for M-fold CV
+    pls_res <- run_splsda_model(X_pls, meta_pls, group_col = "Group", 
+                                n_comp = config$multivariate$n_comp,
+                                folds = config$multivariate$validation_folds)
     
     # Extract Metrics
-    top_drivers <- extract_plsda_loadings(pls_res, top_n = config$multivariate$top_n_loadings)
+    # Note: 'top_n' is no longer needed as sPLS-DA selects features automatically
+    top_drivers <- extract_plsda_loadings(pls_res)
     perf_metrics <- extract_plsda_performance(pls_res)
+    tuning_info  <- as.data.frame(pls_res$tuning$choice.keepX)
+    colnames(tuning_info) <- "Selected_Features"
     
     # Save to Excel
-    addWorksheet(wb, "Global_PLSDA_Drivers")
-    writeData(wb, "Global_PLSDA_Drivers", top_drivers)
+    addWorksheet(wb, "Global_sPLSDA_Drivers")
+    writeData(wb, "Global_sPLSDA_Drivers", top_drivers)
     
-    addWorksheet(wb, "Global_PLSDA_Quality")
-    writeData(wb, "Global_PLSDA_Quality", perf_metrics)
+    addWorksheet(wb, "Global_sPLSDA_Quality")
+    writeData(wb, "Global_sPLSDA_Quality", perf_metrics)
+    writeData(wb, "Global_sPLSDA_Quality", tuning_info, startRow = 6, startCol = 1)
     
     # Log Success
-    ber_msg <- if(is.na(perf_metrics$Overall_BER[1])) "N/A (CV Failed)" else sprintf("%.2f%%", perf_metrics$Overall_BER[1] * 100)
-    message(sprintf("   -> Identified %d top drivers. BER: %s", nrow(top_drivers), ber_msg))
+    ber_msg <- if(is.na(perf_metrics$Overall_BER[1])) "N/A" else sprintf("%.2f%%", perf_metrics$Overall_BER[1] * 100)
+    message(sprintf("   -> sPLS-DA Selected: %d markers (Comp1). BER: %s", 
+                    pls_res$tuning$choice.keepX[1], ber_msg))
     
-    # Save Loading Plot (Barplot)
-    pdf(file.path(out_dir, "Global_PLSDA_Loadings.pdf"), width = 8, height = 6)
-    p_load <- ggplot(top_drivers, aes(x = reorder(Marker, Importance), y = Comp1_Weight, fill = Direction)) +
+    # Save Loading Plot (Barplot of Selected Features ONLY)
+    pdf(file.path(out_dir, "Global_sPLSDA_Loadings.pdf"), width = 8, height = 6)
+    
+    # Plot only Comp 1 drivers for clarity
+    p_load <- ggplot(top_drivers, aes(x = reorder(Marker, Comp1_Weight), y = Comp1_Weight, fill = Direction)) +
       geom_bar(stat = "identity", width = 0.7) +
       coord_flip() +
       scale_fill_manual(values = c("Positive_Assoc" = "#CD5C5C", "Negative_Assoc" = "#4682B4")) +
-      labs(title = "Top Discriminant Markers (PLS-DA)",
-           subtitle = "Comp 1 Loadings: Drivers of Separation",
+      labs(title = "sPLS-DA Signature (Sparse)",
+           subtitle = paste("Comp 1 Selected Features:", pls_res$tuning$choice.keepX[1]),
            x = "Marker", y = "Loading Weight") +
       theme_minimal() + theme(legend.position = "bottom")
     print(p_load)
     dev.off()
     
     # Save Biplot
-    pdf(file.path(out_dir, "Global_PLSDA_Biplot.pdf"), width = 8, height = 7)
+    pdf(file.path(out_dir, "Global_sPLSDA_Biplot.pdf"), width = 8, height = 7)
     mixOmics::plotIndiv(pls_res$model, comp = c(1,2), group = meta_pls$Group, 
-                        ellipse = TRUE, legend = TRUE, title = "PLS-DA: Global Signature")
+                        ellipse = TRUE, legend = TRUE, title = "sPLS-DA: Sparse Signature",
+                        star.plot = TRUE) # Adds lines to centroids
     dev.off()
     
   }, error = function(e) {
-    message(paste("   [ERROR] PLS-DA Execution Failed:", e$message))
+    message(paste("   [ERROR] sPLS-DA Execution Failed:", e$message))
   })
 }
 
