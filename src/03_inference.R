@@ -31,6 +31,11 @@ df_input <- DATA$hybrid_data_z
 if (is.null(DATA$hybrid_markers)) stop("Critical: 'hybrid_markers' whitelist missing in data_processed.rds. Re-run Step 1.")
 markers <- DATA$hybrid_markers
 
+# Check for Step 02 (Adversarial check for robustness)
+if (!dir.exists(file.path(config$output_root, "02_exploratory"))) {
+  warning("[Warning] Step 02 output not found. It is highly recommended to check PERMANOVA results in Step 02 before interpreting networks.")
+}
+
 # 2. Prepare Data Subsets
 # ------------------------------------------------------------------------------
 grp_ctrl <- config$control_group
@@ -51,7 +56,20 @@ mat_case <- get_group_matrix(df_input, grp_case, markers)
 message(sprintf("[Data] Control Group (%s): %d samples", grp_ctrl, nrow(mat_ctrl)))
 message(sprintf("[Data] Case Group (%s): %d samples", paste(grp_case, collapse="+"), nrow(mat_case)))
 
-# 3. Setup Parallel Cluster
+# 3. Pre-Calculate Global Lambda (Stability Fix)
+# ------------------------------------------------------------------------------
+# Estimate lambda ONCE on the full dataset to ensure consistency across bootstraps.
+# corpcor::estimate.lambda calculates the optimal analytical shrinkage intensity.
+
+message("\n[Config] Estimating Global Lambda (Shrinkage Intensity)...")
+
+lambda_ctrl <- corpcor::estimate.lambda(mat_ctrl, verbose = FALSE)
+lambda_case <- corpcor::estimate.lambda(mat_case, verbose = FALSE)
+
+message(sprintf("   -> Lambda Control: %.4f", lambda_ctrl))
+message(sprintf("   -> Lambda Case:    %.4f", lambda_case))
+
+# 4. Setup Parallel Cluster
 # ------------------------------------------------------------------------------
 n_cores_req <- config$stats$n_cores
 if (n_cores_req == "auto") n_cores_req <- parallel::detectCores() - 1
@@ -70,27 +88,28 @@ clusterEvalQ(cl, {
   library(dplyr)
 })
 
-# 4. Bootstrap Inference (Edge Stability)
+# 5. Bootstrap Inference (Edge Stability with Fixed Lambda)
 # ------------------------------------------------------------------------------
-run_parallel_bootstrap <- function(data_mat, n_boot, seed_val) {
+run_parallel_bootstrap <- function(data_mat, n_boot, seed_val, fixed_lambda) {
   n_samples <- nrow(data_mat)
   
   # Set RNG Stream for reproducibility
   parallel::clusterSetRNGStream(cl, seed_val)
   
+  # Pass fixed_lambda to the worker
   res_list <- foreach(i = 1:n_boot, .packages = c("corpcor")) %dopar% {
-    boot_worker_pcor(data_mat, n_samples)
+    boot_worker_pcor(data_mat, n_samples, lambda_val = fixed_lambda)
   }
   
   return(res_list)
 }
 
 message("\n[Inference] 1. Running Bootstrap for Control Group...")
-boot_ctrl_raw <- run_parallel_bootstrap(mat_ctrl, config$stats$n_boot, config$stats$seed)
+boot_ctrl_raw <- run_parallel_bootstrap(mat_ctrl, config$stats$n_boot, config$stats$seed, lambda_ctrl)
 res_ctrl <- aggregate_boot_results(boot_ctrl_raw, alpha = config$stats$alpha)
 
 message("\n[Inference] 2. Running Bootstrap for Case Group...")
-boot_case_raw <- run_parallel_bootstrap(mat_case, config$stats$n_boot, config$stats$seed + 1000)
+boot_case_raw <- run_parallel_bootstrap(mat_case, config$stats$n_boot, config$stats$seed + 1000, lambda_case)
 res_case <- aggregate_boot_results(boot_case_raw, alpha = config$stats$alpha)
 
 # Logging
@@ -103,18 +122,20 @@ message(sprintf("   -> Control Group: %d stable edges (Density: %.2f%%)",
 message(sprintf("   -> Case Group:    %d stable edges (Density: %.2f%%)", 
                 n_edge_case, (n_edge_case/n_possible)*100))
 
-# 5. Differential Network Test (Permutation)
+# 6. Differential Network Test (Permutation)
 # ------------------------------------------------------------------------------
 message("\n[Inference] 3. Running Permutation Test (Differential Edges)...")
+# Note: We do NOT use fixed lambda here because each permutation creates a 
+# totally new covariance structure (Null Hypothesis). Lambda must adapt to the shuffled data.
 
 n_perm <- config$stats$n_perm
 n1 <- nrow(mat_ctrl)
 n2 <- nrow(mat_case)
 pool_mat <- rbind(mat_ctrl, mat_case)
 
-# Calculate Observed Differences
-obs_pcor_ctrl <- infer_network_pcor(mat_ctrl)
-obs_pcor_case <- infer_network_pcor(mat_case)
+# Calculate Observed Differences (using group-specific optimal lambdas)
+obs_pcor_ctrl <- infer_network_pcor(mat_ctrl, fixed_lambda = lambda_ctrl)
+obs_pcor_case <- infer_network_pcor(mat_case, fixed_lambda = lambda_case)
 obs_diff_mat  <- abs(obs_pcor_ctrl - obs_pcor_case)
 
 # Set seed for permutation
@@ -126,9 +147,9 @@ null_diffs <- foreach(i = 1:n_perm, .combine = 'c', .packages = "corpcor") %dopa
   p1 <- pool_mat[shuffled_idx[1:n1], ]
   p2 <- pool_mat[shuffled_idx[(n1 + 1):(n1 + n2)], ]
   
-  # Re-estimate networks
-  r1 <- infer_network_pcor(p1)
-  r2 <- infer_network_pcor(p2)
+  # Re-estimate networks with dynamic lambda (NULL) for H0 simulation
+  r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
+  r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
   
   # Return vector of absolute differences
   list(abs(r1 - r2))
@@ -145,7 +166,7 @@ message(sprintf("   -> Max Observed Diff: %.4f | Mean Observed Diff: %.4f",
 stopCluster(cl)
 message("[System] Parallel Cluster stopped.")
 
-# 6. Calculate P-values and Save
+# 7. Calculate P-values and Save
 # ------------------------------------------------------------------------------
 message("[Post-Process] Calculating P-values and FDR...")
 
@@ -188,7 +209,7 @@ if(nrow(edges_indices) > 0) {
   results_table <- results_table %>% arrange(P_Value)
 }
 
-# 7. Save Outputs
+# 8. Save Outputs
 # ------------------------------------------------------------------------------
 out_dir <- file.path(config$output_root, "03_networks")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
@@ -202,6 +223,7 @@ final_obj <- list(
   ctrl_network = res_ctrl,
   case_network = res_case,
   diff_table = results_table,
+  lambda_params = c(Ctrl = lambda_ctrl, Case = lambda_case),
   config = config
 )
 saveRDS(final_obj, file.path(out_dir, "inference_results.rds"))

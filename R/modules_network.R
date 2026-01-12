@@ -10,24 +10,41 @@ library(dplyr)
 library(foreach)
 
 #' @title Infer Robust Partial Correlation Network
-#' @description Uses Schafer-Strimmer Shrinkage to directly estimate partial correlations.
+#' @description 
+#' Uses Schafer-Strimmer Shrinkage to directly estimate partial correlations.
+#' 
 #' @param mat Numeric matrix (Samples x Features).
+#' @param fixed_lambda Optional numeric. If provided, enforces this shrinkage intensity.
+#'        If NULL, lambda is estimated analytically (James-Stein).
 #' @return Partial correlation matrix with diagonal = 1.
-infer_network_pcor <- function(mat) {
+infer_network_pcor <- function(mat, fixed_lambda = NULL) {
+  
   # Direct calculation using corpcor's optimized function
   # This performs James-Stein shrinkage on covariance and efficient inversion
-  pcor_mat <- corpcor::pcor.shrink(mat, verbose = FALSE)
+  if (is.null(fixed_lambda)) {
+    # Default: Estimate lambda from data
+    pcor_mat <- corpcor::pcor.shrink(mat, verbose = FALSE)
+  } else {
+    # Enforce fixed lambda (e.g., for consistent bootstrap)
+    pcor_mat <- corpcor::pcor.shrink(mat, lambda = fixed_lambda, verbose = FALSE)
+  }
   
   return(as.matrix(pcor_mat))
 }
 
 #' @title Single Bootstrap Worker
-#' @description Worker function for parallel loops.
-boot_worker_pcor <- function(mat, n) {
+#' @description 
+#' Worker function for parallel loops. Supports fixed lambda injection.
+#' 
+#' @param mat Numeric matrix (Samples x Features).
+#' @param n Number of samples to resample.
+#' @param lambda_val Optional fixed lambda value to pass to inference.
+boot_worker_pcor <- function(mat, n, lambda_val = NULL) {
   idx <- sample(1:n, n, replace = TRUE)
   boot_sample <- mat[idx, ]
+  
   tryCatch({
-    return(infer_network_pcor(boot_sample))
+    return(infer_network_pcor(boot_sample, fixed_lambda = lambda_val))
   }, error = function(e) return(NULL))
 }
 

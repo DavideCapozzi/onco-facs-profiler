@@ -129,7 +129,7 @@ if (length(func_markers) > 0) {
   
   # 3. BPCA Imputation
   # This reconstructs missing values based on covariance with other markers
-  mat_func_trans <- impute_matrix_bpca(mat_func_logit, nPcs = 3)
+  mat_func_trans <- impute_matrix_bpca(mat_func_logit, nPcs = "auto")
 }
 
 # 5. Merge & Normalize
