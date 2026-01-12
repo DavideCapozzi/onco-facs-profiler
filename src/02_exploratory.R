@@ -34,7 +34,7 @@ DATA <- readRDS(input_file)
 df_global <- DATA$hybrid_data_z 
 ilr_list <- DATA$ilr_balances 
 metadata  <- DATA$metadata
-meta_cols <- colnames(metadata) # Defined from loaded metadata
+meta_cols <- colnames(metadata)
 my_colors <- get_palette(config)
 safe_markers <- DATA$hybrid_markers
 raw_matrix <- DATA$raw_matrix
@@ -45,237 +45,127 @@ if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 message(sprintf("[Data] Global Matrix: %d Samples x %d Markers (Z-Scored)", 
                 nrow(df_global), ncol(df_global) - length(meta_cols)))
 
-# 2. Data diagnostics
+# 2. Data diagnostics (Refactored)
 # ------------------------------------------------------------------------------
 message("[Diagnostics] Generating unified distribution plots for RAW data...")
-
-# A. Prepare Raw Data with Metadata
-if (!all(rownames(raw_matrix) %in% metadata$Patient_ID)) {
-  warning("[Diagnostics] Mismatch between Raw Matrix IDs and Metadata IDs.")
-}
 
 meta_ordered <- metadata[match(rownames(raw_matrix), metadata$Patient_ID), ]
 df_raw_viz <- cbind(meta_ordered, as.data.frame(raw_matrix))
 
-# Initialize with distinct groups (default state)
+# Visualization merging logic
 df_viz_merged <- df_raw_viz
 viz_colors <- my_colors
 ctrl_grp <- config$control_group 
-
-# Check configuration for merging strategy
 should_merge <- if (!is.null(config$viz$merge_case_groups)) config$viz$merge_case_groups else FALSE
 
 if (should_merge) {
-  # Combine all case group names (e.g., "GroupA + GroupB")
   case_label_str <- paste(config$case_groups, collapse = " + ")
-  
-  # Update Group Label: Control vs Combined Cases
-  df_viz_merged$Plot_Label <- ifelse(
-    df_viz_merged$Group == ctrl_grp, 
-    ctrl_grp, 
-    case_label_str 
-  )
+  df_viz_merged$Plot_Label <- ifelse(df_viz_merged$Group == ctrl_grp, ctrl_grp, case_label_str)
   df_viz_merged$Group <- df_viz_merged$Plot_Label
   
-  # Update Color Palette for the new labels
-  # Retrieve generic 'Case' color (fallback to first case color if generic not defined)
   c_case <- if (!is.null(config$colors$Case)) config$colors$Case else config$colors$cases[1]
-  
-  # Reset colors to match the new merged keys
   viz_colors <- character()
   viz_colors[[ctrl_grp]] <- config$colors$control
   viz_colors[[case_label_str]] <- c_case
-  
-  message(sprintf("   -> Visualization: Merged View (%s vs %s)", ctrl_grp, case_label_str))
-  
-} else {
-  # Keep original Groups and Palette
-  message(sprintf("   -> Visualization: Distinct Groups (%s)", paste(names(viz_colors), collapse = ", ")))
 }
 
-# B. Output
-raw_pdf_path <- file.path(out_dir, "Distributions_Raw_Merged_Stats.pdf")
-message(sprintf("   -> Saving plots to: %s", raw_pdf_path))
+# Prepare Distribution Colors from Config
+dist_cols <- c(
+  mean = if(!is.null(config$colors$distribution$mean)) config$colors$distribution$mean else "darkred",
+  median = if(!is.null(config$colors$distribution$median)) config$colors$distribution$median else "black"
+)
 
+# Output Distribution PDF
+raw_pdf_path <- file.path(out_dir, "Distributions_Raw_Merged_Stats.pdf")
 hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
 
-pdf(raw_pdf_path, width = 8, height = 6) 
-
-for (marker in DATA$markers) {
-  if (marker %in% names(df_viz_merged)) {
-    p <- plot_raw_distribution_merged(
-      data_df = df_viz_merged, 
-      marker_name = marker,
-      colors = viz_colors,     
-      highlight_pattern = hl_pattern,   
-      highlight_color = "#FFD700"  
-    )
-    if (!is.null(p)) print(p)
-  }
-}
-
-dev.off()
+viz_save_distribution_report(
+  data_df = df_viz_merged,
+  markers = DATA$markers,
+  file_path = raw_pdf_path,
+  colors = viz_colors,
+  hl_pattern = hl_pattern,
+  stat_colors = dist_cols
+)
 message("[Diagnostics] Raw distribution analysis complete.\n")
 
 # 3. PCA
 # ------------------------------------------------------------------------------
 message("[PCA] Running PCA on Global Z-Scored Matrix...")
 
-# Prepare Matrix (Exclude metadata)
 pca_input <- df_global[, safe_markers]
-
-# Run PCA (FactoMineR)
 res_pca <- PCA(pca_input, scale.unit = FALSE, graph = FALSE)
-
-highlight_map <- c("_LS" = "#FFD700")
+highlight_map <- c("_LS" = "#FFD700") # Could also be moved to config if needed
+SHOW_LABELS_PCA <- TRUE
 
 # A. Individuals PCA plots
-message("[PCA] Saving Individuals plots to single PDF...")
-
 pdf_ind_path <- file.path(out_dir, "PCA_Global_Individuals_MultiPage.pdf")
 pdf(pdf_ind_path, width = 8, height = 6)
-
-SHOW_LABELS_PCA <- TRUE 
-
-# Page 1: PC1 vs PC2
 print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 2), show_labels = SHOW_LABELS_PCA, highlight_patterns = highlight_map))
-
-# Page 2: PC1 vs PC3
 print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(1, 3), show_labels = SHOW_LABELS_PCA, highlight_patterns = highlight_map))
-
-# Page 3: PC2 vs PC3
 print(plot_pca_custom(res_pca, df_global, my_colors, dims = c(2, 3), show_labels = SHOW_LABELS_PCA, highlight_patterns = highlight_map))
-
 dev.off() 
 
-
 # B. Variables/Loadings plots
-message("[PCA] Saving Variables/Loadings plots to single PDF...")
-
 pdf_var_path <- file.path(out_dir, "PCA_Global_Variables_MultiPage.pdf")
 pdf(pdf_var_path, width = 8, height = 6)
-
 plot_vars_dims <- function(pca_res, axes_vec) {
-  fviz_pca_var(pca_res, 
-               axes = axes_vec,
-               col.var = "contrib", 
-               gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
-               repel = TRUE) + 
+  fviz_pca_var(pca_res, axes = axes_vec, col.var = "contrib", 
+               gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE) + 
     labs(title = sprintf("Variables - PCA (PC%d vs PC%d)", axes_vec[1], axes_vec[2])) +
     theme_coda()
 }
-
-# Page 1: PC1 vs PC2
 print(plot_vars_dims(res_pca, c(1, 2)))
-
-# Page 2: PC1 vs PC3
 print(plot_vars_dims(res_pca, c(1, 3)))
-
-# Page 3: PC2 vs PC3
 print(plot_vars_dims(res_pca, c(2, 3)))
-
 dev.off()
 
-
 # C. Scree Plot
-p_scree <- fviz_eig(res_pca, addlabels = TRUE, ylim = c(0, 50)) + 
-  theme_minimal() + ggtitle("Scree Plot (Global)")
 pdf(file.path(out_dir, "PCA_Global_Scree.pdf"), width = 6, height = 4)
-print(p_scree)
+print(fviz_eig(res_pca, addlabels = TRUE, ylim = c(0, 50)) + theme_minimal() + ggtitle("Scree Plot (Global)"))
 dev.off()
 
 # 4. Patient Stratification Heatmap
 # ------------------------------------------------------------------------------
 message("[Viz] Generating Patient Stratification Heatmap...")
 
-# A. Prepare Data
 mat_heatmap_z <- as.matrix(df_global[, safe_markers])
 rownames(mat_heatmap_z) <- df_global$Patient_ID
 
-# Dynamic Metadata Selection
-target_cols <- config$viz$heatmap_metadata
-if (is.null(target_cols)) target_cols <- c("Group")
+target_cols <- intersect(if(!is.null(config$viz$heatmap_metadata)) config$viz$heatmap_metadata else "Group", names(df_global))
+meta_heatmap <- df_global[, target_cols, drop = FALSE]
 
-valid_cols <- intersect(target_cols, names(df_global))
-if (length(valid_cols) == 0) valid_cols <- c("Group")
+annotation_colors <- viz_generate_complex_heatmap_colors(
+  metadata = meta_heatmap,
+  group_col = "Group",
+  base_colors = my_colors,
+  hl_pattern = config$viz$highlight_pattern,
+  hl_color = config$colors$highlight
+)
 
-meta_heatmap <- df_global[, valid_cols, drop = FALSE]
+# Prepare Heatmap Gradient Colors from Config
+hm_cols <- c(
+  low = if(!is.null(config$colors$heatmap$low)) config$colors$heatmap$low else "#2166AC",
+  mid = if(!is.null(config$colors$heatmap$mid)) config$colors$heatmap$mid else "#F7F7F7",
+  high = if(!is.null(config$colors$heatmap$high)) config$colors$heatmap$high else "#B2182B"
+)
 
-# B. Smart Color Generation
-annotation_colors <- list()
-
-# Group Colors (Base Palette)
-present_groups <- unique(meta_heatmap$Group)
-group_pal <- my_colors[intersect(names(my_colors), present_groups)]
-annotation_colors[["Group"]] <- group_pal
-
-# Extra Metadata Colors (Inheritance or Highlight Logic)
-extra_cols <- setdiff(valid_cols, "Group")
-hl_pattern <- config$viz$highlight_pattern
-hl_color   <- config$colors$highlight
-
-for (col_name in extra_cols) {
-  
-  # Filter out NAs to prevent errors
-  raw_vals <- as.character(meta_heatmap[[col_name]])
-  vals <- sort(unique(raw_vals[!is.na(raw_vals)]))
-  
-  # Initialize as character() to force Named Vector, NOT List
-  col_pal <- character()
-  
-  for (v in vals) {
-    # Priority 1: Exact match to a Group Name -> Inherit Group Color
-    if (v %in% names(group_pal)) {
-      col_pal[[v]] <- group_pal[[v]]
-      
-      # Priority 2: Contains Highlight Pattern (e.g., "_LS") -> Use Highlight Color
-    } else if (!is.null(hl_pattern) && grepl(hl_pattern, v)) {
-      col_pal[[v]] <- hl_color
-      
-      # Priority 3: Subgroup containing Parent Group Name -> Inherit Parent Color
-    } else {
-      parent_match <- NA
-      for (grp in names(group_pal)) {
-        if (grepl(grp, v)) {
-          parent_match <- grp
-          break
-        }
-      }
-      
-      if (!is.na(parent_match)) {
-        col_pal[[v]] <- group_pal[[parent_match]]
-      } else {
-        # Priority 4: Fallback
-        col_pal[[v]] <- "#D3D3D3" # LightGray
-      }
-    }
-  }
-  annotation_colors[[col_name]] <- col_pal
-}
-
-# C. Output PDF
 pdf_heat_path <- file.path(out_dir, "Heatmap_Stratification_Clustered.pdf")
 pdf(pdf_heat_path, width = 10, height = 8)
 
 tryCatch({
-  if(any(is.na(meta_heatmap))) {
-    warning("[Viz] Metadata contains NAs. Heatmap may show white spaces in annotation.")
-  }
-  
   ht_obj <- plot_stratification_heatmap(
     mat_z = mat_heatmap_z,
     metadata = meta_heatmap,
     annotation_colors_list = annotation_colors,
-    title = "Global Clustering (Hybrid Z-Score)"
+    title = "Global Clustering (Hybrid Z-Score)",
+    gradient_colors = hm_cols
   )
   draw(ht_obj, merge_legend = TRUE)
-  
 }, error = function(e) {
   warning(paste("Heatmap generation failed:", e$message))
-  plot.new()
-  text(0.5, 0.5, paste("Heatmap Failed:", e$message), cex = 0.8)
+  plot.new(); text(0.5, 0.5, paste("Heatmap Failed:", e$message), cex = 0.8)
 })
-
 dev.off()
 message(sprintf("   -> Heatmap saved to: %s", pdf_heat_path))
 
@@ -283,20 +173,18 @@ message(sprintf("   -> Heatmap saved to: %s", pdf_heat_path))
 # ------------------------------------------------------------------------------
 wb <- createWorkbook()
 
-# A. Global Analysis (PERMANOVA + PLS-DA)
 message("\n[Stats] Running Global PERMANOVA & Driver Analysis...")
 
 # 1. PERMANOVA
-df_stats_global <- df_global[, c("Group", safe_markers)]
 perm_global <- test_coda_permanova(
-  data_input = df_stats_global, 
+  data_input = df_global[, c("Group", safe_markers)], 
   group_col = "Group", 
   n_perm = config$stats$n_perm
 )
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
-# 2. sPLS-DA Driver Analysis (Updated for Sparse Model)
+# 2. sPLS-DA Driver Analysis (Sparse)
 run_pls <- if(!is.null(config$multivariate$run_plsda)) config$multivariate$run_plsda else FALSE
 
 if (run_pls) {
@@ -306,23 +194,19 @@ if (run_pls) {
     X_pls <- df_global[, safe_markers]
     meta_pls <- df_global[, meta_cols, drop=FALSE]
     
-    # Run Model (using the NEW sparse function)
-    # We pass 5 folds for M-fold CV
+    # Run Model
     pls_res <- run_splsda_model(X_pls, meta_pls, group_col = "Group", 
                                 n_comp = config$multivariate$n_comp,
                                 folds = config$multivariate$validation_folds)
     
-    # Extract Metrics
-    # Note: 'top_n' is no longer needed as sPLS-DA selects features automatically
+    # Extract Metrics & Loadings
     top_drivers <- extract_plsda_loadings(pls_res)
     perf_metrics <- extract_plsda_performance(pls_res)
     tuning_info  <- as.data.frame(pls_res$tuning$choice.keepX)
-    colnames(tuning_info) <- "Selected_Features"
     
-    # Save to Excel
+    # Save Tables
     addWorksheet(wb, "Global_sPLSDA_Drivers")
     writeData(wb, "Global_sPLSDA_Drivers", top_drivers)
-    
     addWorksheet(wb, "Global_sPLSDA_Quality")
     writeData(wb, "Global_sPLSDA_Quality", perf_metrics)
     writeData(wb, "Global_sPLSDA_Quality", tuning_info, startRow = 6, startCol = 1)
@@ -332,27 +216,29 @@ if (run_pls) {
     message(sprintf("   -> sPLS-DA Selected: %d markers (Comp1). BER: %s", 
                     pls_res$tuning$choice.keepX[1], ber_msg))
     
-    # Save Loading Plot (Barplot of Selected Features ONLY)
-    pdf(file.path(out_dir, "Global_sPLSDA_Loadings.pdf"), width = 8, height = 6)
+    # Prepare Loadings Colors
+    pls_cols <- c(
+      positive = if(!is.null(config$colors$plsda$positive)) config$colors$plsda$positive else "#CD5C5C",
+      negative = if(!is.null(config$colors$plsda$negative)) config$colors$plsda$negative else "#4682B4"
+    )
     
-    # Plot only Comp 1 drivers for clarity
-    p_load <- ggplot(top_drivers, aes(x = reorder(Marker, Comp1_Weight), y = Comp1_Weight, fill = Direction)) +
-      geom_bar(stat = "identity", width = 0.7) +
-      coord_flip() +
-      scale_fill_manual(values = c("Positive_Assoc" = "#CD5C5C", "Negative_Assoc" = "#4682B4")) +
-      labs(title = "sPLS-DA Signature (Sparse)",
-           subtitle = paste("Comp 1 Selected Features:", pls_res$tuning$choice.keepX[1]),
-           x = "Marker", y = "Loading Weight") +
-      theme_minimal() + theme(legend.position = "bottom")
-    print(p_load)
-    dev.off()
+    # Save Loadings Plot (Multi-Page using New Wrapper)
+    # Note: tuning_info is passed. The wrapper handles extraction safely now.
+    viz_save_plsda_loadings(
+      loadings_df = top_drivers,
+      n_comp = pls_res$model$ncomp,
+      tuning_df = tuning_info,
+      file_path = file.path(out_dir, "Global_sPLSDA_Loadings.pdf"),
+      bar_colors = pls_cols
+    )
     
-    # Save Biplot
+    # Save Biplot (Previously failed because viz_save_plsda_loadings crashed)
     pdf(file.path(out_dir, "Global_sPLSDA_Biplot.pdf"), width = 8, height = 7)
     mixOmics::plotIndiv(pls_res$model, comp = c(1,2), group = meta_pls$Group, 
                         ellipse = TRUE, legend = TRUE, title = "sPLS-DA: Sparse Signature",
-                        star.plot = TRUE) # Adds lines to centroids
+                        star.plot = TRUE) 
     dev.off()
+    message("   -> sPLS-DA Biplot saved.")
     
   }, error = function(e) {
     message(paste("   [ERROR] sPLS-DA Execution Failed:", e$message))
@@ -362,83 +248,39 @@ if (run_pls) {
 # B. Local PERMANOVA + ILR Decoding
 if (length(ilr_list) > 0) {
   message("\n[Stats] Running Local Analysis on Compositional Groups...")
-  
   summary_local <- data.frame()
   
   for (grp_name in names(ilr_list)) {
-    
     mat_ilr <- ilr_list[[grp_name]]
     
-    # 1. PERMANOVA
-    df_stats_local <- cbind(metadata[, "Group", drop = FALSE], as.data.frame(mat_ilr))
-    res_perm <- test_coda_permanova(df_stats_local, group_col = "Group", n_perm = config$stats$n_perm)
-    
+    res_perm <- test_coda_permanova(cbind(metadata[, "Group", drop=FALSE], as.data.frame(mat_ilr)), group_col = "Group", n_perm = config$stats$n_perm)
     pval <- res_perm$`Pr(>F)`[1]
-    r2   <- res_perm$R2[1]
     
-    message(sprintf("   -> Group '%s': p = %.5f (R2=%.1f%%)", grp_name, pval, r2 * 100))
-    
-    summary_local <- rbind(summary_local, data.frame(
-      SubGroup = grp_name,
-      P_Value = pval,
-      R2_Percent = r2 * 100,
-      F_Model = res_perm$F[1]
-    ))
-    
+    summary_local <- rbind(summary_local, data.frame(SubGroup = grp_name, P_Value = pval, R2_Percent = res_perm$R2[1] * 100))
     sheet_name <- substr(paste0("ILR_", grp_name), 1, 31) 
-    addWorksheet(wb, sheet_name)
-    writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
+    addWorksheet(wb, sheet_name); writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
     
-    # 2. ILR DECODING 
     if (pval < 0.1) {
       target_mks <- config$hybrid_groups[[grp_name]]
       valid_mks <- intersect(target_mks, colnames(raw_matrix))
-      
       if(length(valid_mks) > 1) {
-        message(sprintf("      [Decoder] Decoding balances for '%s'...", grp_name))
-        
-        # A. Subset Raw Matrix for Markers
-        raw_parts_subset <- raw_matrix[, valid_mks, drop = FALSE]
-        
-        # B. Find Common Patients (INTERSECTION) 
-        ids_ilr <- rownames(mat_ilr)
-        ids_raw <- rownames(raw_parts_subset)
-        common_ids <- intersect(ids_ilr, ids_raw)
-        
-        # Check if we have enough matching patients
-        if (length(common_ids) < 3) {
-          warning(sprintf("      [Skip] Not enough matching patients for %s decoder.", grp_name))
-          next
+        common_ids <- intersect(rownames(mat_ilr), rownames(raw_matrix))
+        if (length(common_ids) >= 3) {
+          decoding_table <- decode_ilr_to_clr(mat_ilr[common_ids,,drop=FALSE], raw_matrix[common_ids, valid_mks, drop=FALSE])
+          if (nrow(decoding_table) > 0) {
+            ds_name <- substr(paste0("Dec_", grp_name), 1, 31)
+            addWorksheet(wb, ds_name); writeData(wb, ds_name, decoding_table)
+          }
         }
-        
-        # C. Align Both Matrices perfectly
-        # Subset using the safe intersection list
-        mat_ilr_safe <- mat_ilr[common_ids, , drop = FALSE]
-        raw_parts_safe <- raw_parts_subset[common_ids, , drop = FALSE]
-        
-        # D. Run Decoder
-        decoding_table <- decode_ilr_to_clr(mat_ilr_safe, raw_parts_safe)
-        
-        if (nrow(decoding_table) > 0) {
-          decode_sheet <- substr(paste0("Dec_", grp_name), 1, 31)
-          addWorksheet(wb, decode_sheet)
-          writeData(wb, decode_sheet, decoding_table)
-        }
-      } else {
-        message(sprintf("      [Skip] Markers for '%s' not present in raw matrix.", grp_name))
       }
     }
   }
-  
-  addWorksheet(wb, "Summary_Local_Tests")
-  writeData(wb, "Summary_Local_Tests", summary_local)
+  addWorksheet(wb, "Summary_Local_Tests"); writeData(wb, "Summary_Local_Tests", summary_local)
 }
 
 # 6. Save Output
 # ------------------------------------------------------------------------------
-
 excel_path <- file.path(out_dir, "Statistical_Test_Results.xlsx")
 saveWorkbook(wb, excel_path, overwrite = TRUE)
-
 message(sprintf("\n[Output] Results saved to: %s", out_dir))
 message("=== STEP 2 COMPLETE ===\n")

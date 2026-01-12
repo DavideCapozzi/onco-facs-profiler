@@ -44,6 +44,20 @@ colors:
   cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] # Assigned to case_groups in order
   highlight: "#FFD700"       # Gold (for subgroups matching highlight_pattern)
   Case: "#CD5C5C"           # Indian red Fallback
+
+  heatmap:
+    low: "#2166AC"    # Cool Blue
+    mid: "#F7F7F7"    # White
+    high: "#B2182B"   # Warm Red
+  
+  plsda:
+    positive: "#CD5C5C" # Color for Positive Association
+    negative: "#4682B4" # Color for Negative Association
+    
+  distribution:
+    mean: "darkred"
+    median: "black"
+    
 viz:
   min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
   heatmap_metadata: ["Group", "Original_Source"]
