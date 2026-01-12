@@ -9,7 +9,7 @@ suppressPackageStartupMessages({
   library(factoextra)
   library(openxlsx)
   library(vegan)
-  library(ComplexHeatmap) 
+  library(ComplexHeatmap)
   library(mixOmics)
 })
 
@@ -34,6 +34,7 @@ DATA <- readRDS(input_file)
 df_global <- DATA$hybrid_data_z 
 ilr_list <- DATA$ilr_balances 
 metadata  <- DATA$metadata
+meta_cols <- colnames(metadata) # Defined from loaded metadata
 my_colors <- get_palette(config)
 safe_markers <- DATA$hybrid_markers
 raw_matrix <- DATA$raw_matrix
@@ -219,7 +220,7 @@ for (col_name in extra_cols) {
   raw_vals <- as.character(meta_heatmap[[col_name]])
   vals <- sort(unique(raw_vals[!is.na(raw_vals)]))
   
-  # [FIX] Initialize as character() to force Named Vector, NOT List
+  # Initialize as character() to force Named Vector, NOT List
   col_pal <- character()
   
   for (v in vals) {
@@ -295,8 +296,10 @@ perm_global <- test_coda_permanova(
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
-# 2. PLS-DA Driver Analysis
-if (config$multivariate$run_plsda && exists("plsda")) {
+# 2. PLS-DA Driver Analysis (Supervised)
+run_pls <- if(!is.null(config$multivariate$run_plsda)) config$multivariate$run_plsda else FALSE
+
+if (run_pls) {
   message("   [PLS-DA] Identifying Global Immunological Signature...")
   
   tryCatch({
@@ -304,33 +307,45 @@ if (config$multivariate$run_plsda && exists("plsda")) {
     meta_pls <- df_global[, meta_cols, drop=FALSE]
     
     # Run Model
-    pls_res <- run_plsda_model(X_pls, meta_pls, group_col = "Group", n_comp = config$multivariate$n_comp)
+    pls_res <- run_plsda_model(X_pls, meta_pls, group_col = "Group", 
+                               n_comp = config$multivariate$n_comp)
     
-    # Extract Drivers
+    # Extract Metrics
     top_drivers <- extract_plsda_loadings(pls_res, top_n = config$multivariate$top_n_loadings)
-    
-    # Extract Performance Metrics (Quality Check)
     perf_metrics <- extract_plsda_performance(pls_res)
     
-    # Save Drivers
+    # Save to Excel
     addWorksheet(wb, "Global_PLSDA_Drivers")
     writeData(wb, "Global_PLSDA_Drivers", top_drivers)
     
-    # Save Performance
     addWorksheet(wb, "Global_PLSDA_Quality")
     writeData(wb, "Global_PLSDA_Quality", perf_metrics)
     
-    message(sprintf("   -> Identified %d top driver markers.", nrow(top_drivers)))
-    message(sprintf("   -> Model Error Rate (BER): %.2f%% (Lower is better)", perf_metrics$Overall_BER[1] * 100))
+    # Log Success
+    ber_msg <- if(is.na(perf_metrics$Overall_BER[1])) "N/A (CV Failed)" else sprintf("%.2f%%", perf_metrics$Overall_BER[1] * 100)
+    message(sprintf("   -> Identified %d top drivers. BER: %s", nrow(top_drivers), ber_msg))
     
-    # Save Plot
+    # Save Loading Plot (Barplot)
+    pdf(file.path(out_dir, "Global_PLSDA_Loadings.pdf"), width = 8, height = 6)
+    p_load <- ggplot(top_drivers, aes(x = reorder(Marker, Importance), y = Comp1_Weight, fill = Direction)) +
+      geom_bar(stat = "identity", width = 0.7) +
+      coord_flip() +
+      scale_fill_manual(values = c("Positive_Assoc" = "#CD5C5C", "Negative_Assoc" = "#4682B4")) +
+      labs(title = "Top Discriminant Markers (PLS-DA)",
+           subtitle = "Comp 1 Loadings: Drivers of Separation",
+           x = "Marker", y = "Loading Weight") +
+      theme_minimal() + theme(legend.position = "bottom")
+    print(p_load)
+    dev.off()
+    
+    # Save Biplot
     pdf(file.path(out_dir, "Global_PLSDA_Biplot.pdf"), width = 8, height = 7)
     mixOmics::plotIndiv(pls_res$model, comp = c(1,2), group = meta_pls$Group, 
                         ellipse = TRUE, legend = TRUE, title = "PLS-DA: Global Signature")
     dev.off()
     
   }, error = function(e) {
-    warning(paste("PLS-DA Failed:", e$message))
+    message(paste("   [ERROR] PLS-DA Execution Failed:", e$message))
   })
 }
 
