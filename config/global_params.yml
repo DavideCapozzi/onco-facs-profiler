@@ -76,6 +76,8 @@ viz:
 qc:
   max_na_row_pct: 0.55  # Drop patients with NA percentage higher than this  
   max_na_col_pct: 0.20  # Drop markerswith NA percentage higher than this  
+  remove_outliers: true
+  outlier_conf_level: 0.99 # Drops samples outside 95% confidence interval (Mahalanobis)
 
 # --- Imputation (CoDa) ---
 imputation:

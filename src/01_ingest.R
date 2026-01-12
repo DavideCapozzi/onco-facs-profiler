@@ -27,16 +27,15 @@ raw_data <- load_raw_data(config)
 
 # 2. Setup Matrices
 # ------------------------------------------------------------------------------
+# Pre-Split Metadata and Matrix
 subgroup_col <- config$metadata$subgroup_col
 meta_cols <- c("Patient_ID", "Group")
+if (!is.null(subgroup_col)) meta_cols <- c(meta_cols, subgroup_col)
 
-if (!is.null(subgroup_col) && subgroup_col %in% names(raw_data)) {
-  meta_cols <- c(meta_cols, subgroup_col)
-}
-
-marker_cols <- setdiff(names(raw_data), meta_cols)
-mat_raw <- as.matrix(raw_data[, marker_cols])
+# Extract Metadata and Matrix aligned
+mat_raw <- as.matrix(raw_data[, setdiff(names(raw_data), meta_cols)])
 rownames(mat_raw) <- raw_data$Patient_ID
+metadata_raw <- raw_data[, meta_cols]
 
 message(sprintf("[Data] Initial Matrix: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
@@ -53,8 +52,12 @@ mat_raw <- mat_raw[, target_markers, drop = FALSE]
 
 # 3. Quality Control
 # ------------------------------------------------------------------------------
-qc_result <- run_qc_pipeline(mat_raw, config$qc, dropped_apriori = data.frame())
+# We pass metadata specifically for group-based outlier detection
+qc_result <- run_qc_pipeline(mat_raw, metadata_raw, config$qc, dropped_apriori = data.frame())
+
 mat_raw <- qc_result$data
+raw_data <- cbind(qc_result$metadata, as.data.frame(mat_raw)) 
+
 qc_summary <- qc_result$report
 valid_patients <- rownames(mat_raw)
 raw_data <- raw_data %>% filter(Patient_ID %in% valid_patients)

@@ -114,7 +114,7 @@ save_qc_report <- function(qc_list, out_path) {
   
   # Write Dropped Patients
   if (nrow(qc_list$dropped_rows_detail) > 0) {
-    writeData(wb, "Details_Dropped", "Dropped Patients (> Threshold NA):", startRow = curr_row)
+    writeData(wb, "Details_Dropped", "Dropped Patients (High NA or Outliers):", startRow = curr_row)
     curr_row <- curr_row + 1
     writeData(wb, "Details_Dropped", qc_list$dropped_rows_detail, startRow = curr_row)
     curr_row <- curr_row + nrow(qc_list$dropped_rows_detail) + 3
