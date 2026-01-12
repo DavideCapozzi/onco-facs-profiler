@@ -25,6 +25,14 @@ case_groups: ["NSCLC", "HNSCC"]
 # control_group: "Healthy"
 # case_groups: ["DS_Duraclone"]
 
+# --- Analysis Design ---
+analysis_design:
+  # mode: "distinct"      # Keeps groups separate: Healthy vs NSCLC vs HNSCC
+  mode: "binary"          # Merges into 2 groups: Control vs Case
+  # mode: "stratified_ls" # Splits Case into: Case_LS vs Case_Std vs Control
+  
+  ls_pattern: "_LS"       # Pattern to identify Long Survivors in subgroup_col
+
 marker_selection:
   whitelist: []      
   blacklist: [] #["PD1", "PD1CD4", "PD1CD8", "CD137CD8", "CD137PD1", "CD8"]       
@@ -57,7 +65,7 @@ colors:
   distribution:
     mean: "darkred"
     median: "black"
-    
+
 viz:
   min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
   heatmap_metadata: ["Group", "Original_Source"]
