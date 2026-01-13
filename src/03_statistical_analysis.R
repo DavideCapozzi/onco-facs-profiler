@@ -15,16 +15,16 @@ source("R/utils_io.R")
 source("R/modules_hypothesis.R") 
 source("R/modules_multivariate.R")   
 source("R/modules_interpretation.R")
-source("R/modules_viz.R") # Needed for PLS reporting
+source("R/modules_viz.R") 
 
 message("\n=== PIPELINE STEP 3: STATISTICAL ANALYSIS ===")
 
 # 1. Load Config & Data
 # ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
-input_file <- file.path(config$output_root, "01_QC", "data_processed.rds")
+input_file <- file.path(config$output_root, "01_data_processing", "data_processed.rds")
 
-if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.R first.")
+if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_data_processing.R first.")
 
 DATA <- readRDS(input_file)
 
@@ -117,12 +117,26 @@ if (run_pls) {
     # Note: We pass original metadata/colors for Visualization (Points colored by subtype)
     colors_viz <- get_palette(config)
     
+    # Identify the levels used in PLS
+    pls_levels <- levels(factor(meta_stats$Group))
+    # Assuming standard order (Control first, Case second) or check Config
+    lbl_vec <- c("Negative" = "Reference/Control", "Positive" = "Case/Target")
+    
+    # Try to be more specific if possible using config
+    if (length(config$case_groups) > 0) {
+      lbl_vec["Positive"] <- paste(config$case_groups, collapse="+")
+    }
+    if (!is.null(config$control_group)) {
+      lbl_vec["Negative"] <- config$control_group
+    }
+    
     viz_report_plsda(
       pls_res = pls_res, 
       drivers_df = top_drivers, 
       metadata_viz = meta_orig, 
       colors_viz = colors_viz, 
-      out_path = file.path(out_dir, "Global_sPLSDA_Results.pdf")
+      out_path = file.path(out_dir, "Global_sPLSDA_Results.pdf"),
+      binary_labels = lbl_vec  
     )
     
   }, error = function(e) {

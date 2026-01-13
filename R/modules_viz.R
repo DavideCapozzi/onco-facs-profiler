@@ -158,6 +158,48 @@ plot_raw_distribution_merged <- function(data_df, marker_name, colors,
   return(p)
 }
 
+#' @title Save Distribution Report (Multi-Page PDF)
+#' @description 
+#' Iterates through all markers and saves their raw distribution plots 
+#' into a single PDF file. Encapsulates the looping logic.
+#' 
+#' @param data_df Merged dataframe with metadata and raw values.
+#' @param markers Vector of marker names to plot.
+#' @param file_path Output path for the PDF.
+#' @param colors Named vector of colors for groups.
+#' @param hl_pattern String pattern for highlighting (e.g. "_LS").
+viz_save_distribution_report <- function(data_df, markers, file_path, colors, hl_pattern = "") {
+  
+  if (length(markers) == 0) {
+    warning("[Viz] No markers provided for distribution report.")
+    return(NULL)
+  }
+  
+  message(sprintf("   [Viz] Saving distribution report to: %s", basename(file_path)))
+  
+  pdf(file_path, width = 8, height = 6)
+  
+  for (marker in markers) {
+    if (marker %in% names(data_df)) {
+      # Try-catch ensures one bad plot doesn't crash the whole PDF generation
+      tryCatch({
+        p <- plot_raw_distribution_merged(
+          data_df = data_df, 
+          marker_name = marker,
+          colors = colors,     
+          highlight_pattern = hl_pattern,   
+          highlight_color = "#FFD700"
+        )
+        if (!is.null(p)) print(p)
+      }, error = function(e) {
+        warning(sprintf("      [WARN] Failed to plot marker '%s': %s", marker, e$message))
+      })
+    }
+  }
+  
+  dev.off()
+}
+
 #' @title Run PCA on Compositional Data
 #' @description Wraps FactoMineR::PCA with settings appropriate for CLR data.
 #' @param data_matrix A numeric matrix (CLR transformed markers).
@@ -402,6 +444,163 @@ viz_generate_complex_heatmap_colors <- function(metadata, group_col, base_colors
   return(annotation_colors)
 }
 
+#' @title Plot Signature Boxplots (Top Drivers)
+#' @description 
+#' Helper function to visualize the distribution of the top discriminating markers.
+#' Draws boxplots of Z-scores for the features with highest loadings.
+#' 
+#' @param data_matrix Numeric matrix of data used in PLS (usually Z-scored).
+#' @param group_factor Factor vector defining groups.
+#' @param loadings_df Dataframe of loadings from extract_plsda_loadings.
+#' @param comp Integer. Which component to visualize?
+#' @param n_top Integer. How many top markers to plot?
+#' @param colors Named vector of colors.
+#' @return A ggplot object.
+viz_plot_signature_boxplots <- function(data_matrix, group_factor, loadings_df, 
+                                        comp = 1, n_top = 6, colors) {
+  
+  col_name <- paste0("Comp", comp, "_Weight")
+  if (!col_name %in% names(loadings_df)) return(NULL)
+  
+  # Filter top absolute weights
+  top_mks <- loadings_df %>%
+    arrange(desc(abs(!!sym(col_name)))) %>%
+    head(n_top) %>%
+    pull(Marker)
+  
+  if (length(top_mks) == 0) return(NULL)
+  
+  # Prepare long dataframe for plotting
+  plot_df <- as.data.frame(data_matrix[, top_mks, drop=FALSE])
+  plot_df$Group <- group_factor
+  
+  long_df <- plot_df %>%
+    pivot_longer(-Group, names_to = "Marker", values_to = "Z_Score") %>%
+    mutate(Marker = factor(Marker, levels = top_mks)) # Preserve order
+  
+  p <- ggplot(long_df, aes(x = Group, y = Z_Score, fill = Group)) +
+    geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+    geom_jitter(width = 0.2, size = 1, alpha = 0.6) +
+    facet_wrap(~Marker, scales = "free_y", ncol = 3) +
+    scale_fill_manual(values = colors) +
+    labs(
+      title = sprintf("Top %d Drivers Distribution (Comp %d)", n_top, comp),
+      subtitle = "Visual validation of PLS-DA weights (Z-Scores)",
+      y = "Standardized Abundance (Z)", x = NULL
+    ) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "none", strip.background = element_rect(fill="gray95"))
+  
+  return(p)
+}
+
+#' @title Report sPLS-DA Visualization (Comprehensive)
+#' @description 
+#' Generates a comprehensive PDF report for sPLS-DA results.
+#' UPDATED: Includes explicit group labeling, multi-component analysis, and signature boxplots.
+#' 
+#' @param pls_res The result object from run_splsda_model.
+#' @param drivers_df Dataframe of extracted loadings.
+#' @param metadata_viz Dataframe for plotting (Original detailed groups).
+#' @param colors_viz Named vector of colors for metadata_viz groups.
+#' @param out_path Path to save the PDF.
+#' @param binary_labels Named vector defining directionality (e.g. c("Negative"="Ctrl", "Positive"="Case")).
+viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path, 
+                             binary_labels = NULL) {
+  
+  if (is.null(pls_res$model)) return(NULL)
+  
+  requireNamespace("mixOmics", quietly = TRUE)
+  require(ggplot2)
+  require(dplyr)
+  require(tidyr)
+  
+  message(sprintf("   [Viz] Generating sPLS-DA graphical report: %s", basename(out_path)))
+  
+  pdf(out_path, width = 11, height = 8)
+  
+  # Setup data for plotting
+  plot_group_factor <- as.factor(metadata_viz$Group)
+  plot_colors <- colors_viz[levels(plot_group_factor)]
+  n_comps <- pls_res$model$ncomp
+  
+  # 1. Indiv Biplot (Global Separation)
+  tryCatch({
+    mixOmics::plotIndiv(pls_res$model, 
+                        comp = c(1,2), 
+                        group = plot_group_factor, 
+                        col.per.group = plot_colors, 
+                        ellipse = TRUE, 
+                        legend = TRUE, 
+                        title = "sPLS-DA: Model Separation",
+                        subtitle = "Ellipses indicate 95% confidence region",
+                        star.plot = TRUE)
+  }, error = function(e) {
+    plot.new(); text(0.5, 0.5, paste("Biplot Error:", e$message))
+  })
+  
+  # Iterate over components for Loadings & Boxplots
+  for (i in 1:n_comps) {
+    
+    comp_col <- paste0("Comp", i, "_Weight")
+    if (!comp_col %in% names(drivers_df)) next
+    
+    # Filter drivers for this component
+    df_comp <- drivers_df[abs(drivers_df[[comp_col]]) > 0, ]
+    
+    if (nrow(df_comp) > 0) {
+      
+      # Prepare subtitles
+      label_sub <- ""
+      if (!is.null(binary_labels)) {
+        label_sub <- sprintf("Interpretation: Positive -> %s | Negative -> %s", 
+                             binary_labels["Positive"], binary_labels["Negative"])
+      }
+      
+      # 2. Loading Plot
+      p_load <- ggplot(df_comp, aes(x = reorder(Marker, abs(df_comp[[comp_col]])), 
+                                    y = df_comp[[comp_col]], 
+                                    fill = Direction)) +
+        geom_bar(stat = "identity", width = 0.7) +
+        coord_flip() +
+        scale_fill_manual(values = c("Positive_Assoc" = "#CD5C5C", "Negative_Assoc" = "#4682B4")) +
+        labs(title = sprintf("sPLS-DA Loadings (Component %d)", i), 
+             subtitle = label_sub,
+             x = "Marker", y = "Weight Contribution") +
+        theme_coda() + theme(legend.position = "bottom")
+      print(p_load)
+      
+      # 3. Signature Boxplots (Visual Validation)
+      # We use the training data (X) from the PLS model which corresponds to the drivers
+      p_box <- viz_plot_signature_boxplots(
+        data_matrix = pls_res$model$X, 
+        group_factor = plot_group_factor,
+        loadings_df = df_comp, 
+        comp = i, 
+        n_top = 9, # Show top 9 markers
+        colors = plot_colors
+      )
+      if (!is.null(p_box)) print(p_box)
+    }
+  }
+  
+  # 4. Clustered Image Map (CIM)
+  # Only if we have enough features
+  if (nrow(drivers_df) > 1) {
+    tryCatch({
+      row_cols <- colors_viz[as.character(metadata_viz$Group)]
+      mixOmics::cim(pls_res$model, 
+                    row.sideColors = row_cols,
+                    title = "Global Signature Heatmap (CIM)",
+                    margins = c(7, 7),
+                    save = NULL) 
+    }, error = function(e) {
+      plot.new(); text(0.5, 0.5, paste("CIM Error (Low variance or singular):", e$message))
+    })
+  }
+  
+  dev.off()
+}
 
 #' @title Save sPLS-DA Loadings Report (Multi-Page) - FIXED & DECOUPLED
 #' @param bar_colors Named vector with 'positive' and 'negative'.
@@ -534,46 +733,4 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
     )
   
   return(p)
-}
-
-#' @title Save Distribution Report (Multi-Page PDF)
-#' @description 
-#' Iterates through all markers and saves their raw distribution plots 
-#' into a single PDF file. Encapsulates the looping logic.
-#' 
-#' @param data_df Merged dataframe with metadata and raw values.
-#' @param markers Vector of marker names to plot.
-#' @param file_path Output path for the PDF.
-#' @param colors Named vector of colors for groups.
-#' @param hl_pattern String pattern for highlighting (e.g. "_LS").
-viz_save_distribution_report <- function(data_df, markers, file_path, colors, hl_pattern = "") {
-  
-  if (length(markers) == 0) {
-    warning("[Viz] No markers provided for distribution report.")
-    return(NULL)
-  }
-  
-  message(sprintf("   [Viz] Saving distribution report to: %s", basename(file_path)))
-  
-  pdf(file_path, width = 8, height = 6)
-  
-  for (marker in markers) {
-    if (marker %in% names(data_df)) {
-      # Try-catch ensures one bad plot doesn't crash the whole PDF generation
-      tryCatch({
-        p <- plot_raw_distribution_merged(
-          data_df = data_df, 
-          marker_name = marker,
-          colors = colors,     
-          highlight_pattern = hl_pattern,   
-          highlight_color = "#FFD700"
-        )
-        if (!is.null(p)) print(p)
-      }, error = function(e) {
-        warning(sprintf("      [WARN] Failed to plot marker '%s': %s", marker, e$message))
-      })
-    }
-  }
-  
-  dev.off()
 }

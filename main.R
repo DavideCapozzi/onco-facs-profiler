@@ -25,9 +25,9 @@ if (!file.exists(config_path)) stop("Configuration file missing!")
 
 # C. Pipeline Orchestration
 # --- STEP 1: Data Ingestion & CoDa Preprocessing ---
-# Handles: Excel loading -> Filter -> Zero Repl (CZM) -> kNN Opt -> Imputation -> CLR
+# Handles: Excel loading -> Filter -> Zero Repl (CZM) ->  Imputation -> CLR/logit
 message("\n========================================================\nSTEP 1: STARTING DATA PROCESSING\n========================================================\n")
-source("src/01_data_processing", echo = FALSE)
+source("src/01_data_processing.R", echo = FALSE)
 
 # --- STEP 2: Visualization ---
 # Handles: PCA, Scree Plots, Outlier visualization
@@ -39,7 +39,7 @@ source("src/02_visualization.R", echo = FALSE)
 message("\n========================================================\nSTEP 3: STARTING STATISTICAL ANALYSIS\n========================================================\n")
 source("src/03_statistical_analysis.R", echo = FALSE)
 
-# --- STEP 4: Statistical Inference ---
+# --- STEP 4: Network Inference ---
 # Handles: Bootstrap Networks, Permutation Tests, FDR
 message("\n========================================================\nSTEP 4: STARTING NETWORK INFERENCE\n========================================================\n")
 source("src/04_network_inference.R", echo = FALSE)

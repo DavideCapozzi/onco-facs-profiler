@@ -18,7 +18,7 @@ message("\n=== PIPELINE STEP 5: NETWORK ANALYSIS & EXPORT ===")
 
 # 1. Load Config & Step 4 Results
 config <- load_config("config/global_params.yml")
-input_file <- file.path(config$output_root, "03_networks", "inference_results.rds")
+input_file <- file.path(config$output_root, "04_network_inference", "inference_results.rds")
 
 if (!file.exists(input_file)) stop("Step 04 output not found. Run src/04_network_inference.R first.")
 

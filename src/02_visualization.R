@@ -20,9 +20,9 @@ message("\n=== PIPELINE STEP 2: VISUALIZATION ===")
 # 1. Load Config & Data
 # ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
-input_file <- file.path(config$output_root, "01_QC", "data_processed.rds")
+input_file <- file.path(config$output_root, "01_data_processing", "data_processed.rds")
 
-if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.R first.")
+if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_data_processing.R first.")
 
 DATA <- readRDS(input_file)
 
