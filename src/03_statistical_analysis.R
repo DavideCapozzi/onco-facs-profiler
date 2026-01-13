@@ -87,9 +87,12 @@ writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 # 3. sPLS-DA (Driver Analysis)
 # ------------------------------------------------------------------------------
 run_pls <- if(!is.null(config$multivariate$run_plsda)) config$multivariate$run_plsda else FALSE
-
 if (run_pls) {
   message(sprintf("   [sPLS-DA] Fitting model on Statistical Groups..."))
+  
+  # [CRITICAL FIX] Set Seed immediately before tuning to ensure reproducible feature selection
+  # This fixes the "worse stratification" issue caused by random feature selection changes
+  set.seed(config$stats$seed) 
   
   tryCatch({
     X_pls <- df_global[, safe_markers]
@@ -114,29 +117,15 @@ if (run_pls) {
     writeData(wb, "Global_sPLSDA_Quality", tuning_info, startRow = 6, startCol = 1)
     
     # Generate Plots using the Viz Module
-    # Note: We pass original metadata/colors for Visualization (Points colored by subtype)
+    # Auto-detection of direction is now handled inside the function
     colors_viz <- get_palette(config)
-    
-    # Identify the levels used in PLS
-    pls_levels <- levels(factor(meta_stats$Group))
-    # Assuming standard order (Control first, Case second) or check Config
-    lbl_vec <- c("Negative" = "Reference/Control", "Positive" = "Case/Target")
-    
-    # Try to be more specific if possible using config
-    if (length(config$case_groups) > 0) {
-      lbl_vec["Positive"] <- paste(config$case_groups, collapse="+")
-    }
-    if (!is.null(config$control_group)) {
-      lbl_vec["Negative"] <- config$control_group
-    }
     
     viz_report_plsda(
       pls_res = pls_res, 
       drivers_df = top_drivers, 
       metadata_viz = meta_orig, 
       colors_viz = colors_viz, 
-      out_path = file.path(out_dir, "Global_sPLSDA_Results.pdf"),
-      binary_labels = lbl_vec  
+      out_path = file.path(out_dir, "Global_sPLSDA_Results.pdf")
     )
     
   }, error = function(e) {

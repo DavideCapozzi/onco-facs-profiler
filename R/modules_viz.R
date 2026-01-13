@@ -494,19 +494,18 @@ viz_plot_signature_boxplots <- function(data_matrix, group_factor, loadings_df,
   return(p)
 }
 
-#' @title Report sPLS-DA Visualization (Comprehensive)
+#' @title Report sPLS-DA Visualization (Comprehensive & Auto-Sensing)
 #' @description 
 #' Generates a comprehensive PDF report for sPLS-DA results.
-#' UPDATED: Includes explicit group labeling, multi-component analysis, and signature boxplots.
+#' Automatically detects group direction and resolves colors robustly.
+#' Fixed ggplot2 warnings using .data pronoun.
 #' 
 #' @param pls_res The result object from run_splsda_model.
 #' @param drivers_df Dataframe of extracted loadings.
 #' @param metadata_viz Dataframe for plotting (Original detailed groups).
 #' @param colors_viz Named vector of colors for metadata_viz groups.
 #' @param out_path Path to save the PDF.
-#' @param binary_labels Named vector defining directionality (e.g. c("Negative"="Ctrl", "Positive"="Case")).
-viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path, 
-                             binary_labels = NULL) {
+viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path) {
   
   if (is.null(pls_res$model)) return(NULL)
   
@@ -524,7 +523,23 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
   plot_colors <- colors_viz[levels(plot_group_factor)]
   n_comps <- pls_res$model$ncomp
   
-  # 1. Indiv Biplot (Global Separation)
+  # --- HELPER: Smart Color Resolution ---
+  resolve_color <- function(grp_name, palette) {
+    if (grp_name %in% names(palette)) return(palette[[grp_name]])
+    # Synonym Handling
+    if (grp_name %in% c("Control", "Reference", "Healthy_Ctrl")) {
+      candidates <- c("Healthy", "HD", "Healthy_Donors", "Control")
+      for(c in candidates) if(c %in% names(palette)) return(palette[[c]])
+      return(palette[[1]])
+    }
+    if (grp_name %in% c("Case", "Target", "Disease")) {
+      if("Case" %in% names(palette)) return(palette[["Case"]])
+      return(palette[[length(palette)]])
+    }
+    return("gray50") 
+  }
+  
+  # 1. Indiv Biplot
   tryCatch({
     mixOmics::plotIndiv(pls_res$model, 
                         comp = c(1,2), 
@@ -539,45 +554,53 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     plot.new(); text(0.5, 0.5, paste("Biplot Error:", e$message))
   })
   
-  # Iterate over components for Loadings & Boxplots
+  # Iterate over components
   for (i in 1:n_comps) {
     
     comp_col <- paste0("Comp", i, "_Weight")
     if (!comp_col %in% names(drivers_df)) next
     
-    # Filter drivers for this component
+    # Auto-Detection Logic
+    variates <- pls_res$model$variates$X[, i]
+    stat_groups <- pls_res$model$Y 
+    group_means <- tapply(variates, stat_groups, mean)
+    
+    pos_group_name <- names(group_means)[which.max(group_means)]
+    neg_group_name <- names(group_means)[which.min(group_means)]
+    
+    label_sub <- sprintf("Auto-Detected Direction: Positive (>0) -> %s | Negative (<0) -> %s", 
+                         pos_group_name, neg_group_name)
+    
+    current_fill_colors <- c()
+    current_fill_colors[[pos_group_name]] <- resolve_color(pos_group_name, colors_viz)
+    current_fill_colors[[neg_group_name]] <- resolve_color(neg_group_name, colors_viz)
+    
     df_comp <- drivers_df[abs(drivers_df[[comp_col]]) > 0, ]
     
     if (nrow(df_comp) > 0) {
+      df_comp$Association <- ifelse(df_comp[[comp_col]] > 0, pos_group_name, neg_group_name)
       
-      # Prepare subtitles
-      label_sub <- ""
-      if (!is.null(binary_labels)) {
-        label_sub <- sprintf("Interpretation: Positive -> %s | Negative -> %s", 
-                             binary_labels["Positive"], binary_labels["Negative"])
-      }
-      
-      # 2. Loading Plot
-      p_load <- ggplot(df_comp, aes(x = reorder(Marker, abs(df_comp[[comp_col]])), 
-                                    y = df_comp[[comp_col]], 
-                                    fill = Direction)) +
+      # 2. Loading Plot (Fixed ggplot warnings with .data)
+      p_load <- ggplot(df_comp, aes(x = reorder(Marker, abs(.data[[comp_col]])), 
+                                    y = .data[[comp_col]], 
+                                    fill = Association)) +
         geom_bar(stat = "identity", width = 0.7) +
         coord_flip() +
-        scale_fill_manual(values = c("Positive_Assoc" = "#CD5C5C", "Negative_Assoc" = "#4682B4")) +
+        scale_fill_manual(values = current_fill_colors) +
         labs(title = sprintf("sPLS-DA Loadings (Component %d)", i), 
              subtitle = label_sub,
-             x = "Marker", y = "Weight Contribution") +
+             x = "Marker", y = "Weight Contribution",
+             fill = "Associated Group") +
         theme_coda() + theme(legend.position = "bottom")
       print(p_load)
       
-      # 3. Signature Boxplots (Visual Validation)
-      # We use the training data (X) from the PLS model which corresponds to the drivers
+      # 3. Signature Boxplots
       p_box <- viz_plot_signature_boxplots(
         data_matrix = pls_res$model$X, 
         group_factor = plot_group_factor,
         loadings_df = df_comp, 
         comp = i, 
-        n_top = 9, # Show top 9 markers
+        n_top = 9, 
         colors = plot_colors
       )
       if (!is.null(p_box)) print(p_box)
@@ -585,17 +608,22 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
   }
   
   # 4. Clustered Image Map (CIM)
-  # Only if we have enough features
   if (nrow(drivers_df) > 1) {
     tryCatch({
-      row_cols <- colors_viz[as.character(metadata_viz$Group)]
+      # Apply smart color resolution to row side colors
+      # This fixes the issue where "Healthy" became gray because it didn't match "Control"
+      groups_vec <- as.character(metadata_viz$Group)
+      unique_grps <- unique(groups_vec)
+      row_cols_map <- setNames(sapply(unique_grps, function(g) resolve_color(g, colors_viz)), unique_grps)
+      row_cols <- row_cols_map[groups_vec]
+      
       mixOmics::cim(pls_res$model, 
                     row.sideColors = row_cols,
                     title = "Global Signature Heatmap (CIM)",
                     margins = c(7, 7),
                     save = NULL) 
     }, error = function(e) {
-      plot.new(); text(0.5, 0.5, paste("CIM Error (Low variance or singular):", e$message))
+      plot.new(); text(0.5, 0.5, paste("CIM Error:", e$message))
     })
   }
   
