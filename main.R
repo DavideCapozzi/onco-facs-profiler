@@ -2,7 +2,7 @@
 # ==============================================================================
 # PROJECT: ROBUST COMPOSITIONAL DATA ANALYSIS PIPELINE (FACS/CYTOF)
 # AUTHOR: Davide Capozzi
-# DATE: 28/12/2025
+# DATE: 13/01/2026
 # ==============================================================================
 setwd("/home/davidec/projects/compositional_analysis")
 
@@ -24,28 +24,30 @@ config_path <- "config/global_params.yml"
 if (!file.exists(config_path)) stop("Configuration file missing!")
 
 # C. Pipeline Orchestration
-
 # --- STEP 1: Data Ingestion & CoDa Preprocessing ---
 # Handles: Excel loading -> Filter -> Zero Repl (CZM) -> kNN Opt -> Imputation -> CLR
-message("\n========================================================\nSTEP 1: STARTING INGESTION & PREPROCESSING\n========================================================\n")
-source("src/01_ingest.R", echo = FALSE)
+message("\n========================================================\nSTEP 1: STARTING DATA PROCESSING\n========================================================\n")
+source("src/01_data_processing", echo = FALSE)
 
-
-# --- STEP 2: Exploratory Data Analysis (EDA) ---
+# --- STEP 2: Visualization ---
 # Handles: PCA, Scree Plots, Outlier visualization
-message("\n========================================================\nSTEP 2: STARTING EXPLORATORY ANALYSIS (PCA)\n========================================================\n")
-source("src/02_exploratory.R", echo = FALSE)
+message("\n========================================================\nSTEP 2: STARTING VISUALIZATION\n========================================================\n")
+source("src/02_visualization.R", echo = FALSE)
 
-
-# --- STEP 3: Statistical Inference ---
-# Handles: Bootstrap Networks, Permutation Tests, FDR
-message("\n========================================================\nSTEP 3: STARTING INFERENCE ENGINE\n========================================================\n")
-source("src/03_inference.R", echo = FALSE)
+# --- STEP 3: Statistical Analysis ---
+# Handles: PERMANOVA, sPLS-DA, ILR Decoding
+message("\n========================================================\nSTEP 3: STARTING STATISTICAL ANALYSIS\n========================================================\n")
+source("src/03_statistical_analysis.R", echo = FALSE)
 
 # --- STEP 4: Statistical Inference ---
+# Handles: Bootstrap Networks, Permutation Tests, FDR
+message("\n========================================================\nSTEP 4: STARTING NETWORK INFERENCE\n========================================================\n")
+source("src/04_network_inference.R", echo = FALSE)
+
+# --- STEP 5: Statistical Inference ---
 # Handles: Network Topology Analysis
-message("\n========================================================\nSTEP 4: STARTING NETWORK ANALYSIS\n========================================================\n")
-source("src/04_network_analysis.R", echo = FALSE)
+message("\n========================================================\nSTEP 5: STARTING NETWORK TOPOLOGY\n========================================================\n")
+source("src/05_network_topology.R", echo = FALSE)
 
 # D. Completion
 message("\n========================================================\n[SUCCESS] PIPELINE FINISHED.\n========================================================\n")

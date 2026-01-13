@@ -1,6 +1,6 @@
-# src/04_network_analysis.R
+# src/05_network_topology.R
 # ==============================================================================
-# STEP 04: NETWORK TOPOLOGY & CYTOSCAPE EXPORT
+# STEP 05: NETWORK TOPOLOGY & CYTOSCAPE EXPORT
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -14,20 +14,20 @@ source("R/utils_io.R")
 source("R/modules_network.R")   
 source("R/modules_viz.R")       
 
-message("\n=== PIPELINE STEP 4: NETWORK ANALYSIS & EXPORT ===")
+message("\n=== PIPELINE STEP 5: NETWORK ANALYSIS & EXPORT ===")
 
-# 1. Load Config & Step 3 Results
+# 1. Load Config & Step 4 Results
 config <- load_config("config/global_params.yml")
 input_file <- file.path(config$output_root, "03_networks", "inference_results.rds")
 
-if (!file.exists(input_file)) stop("Step 03 output not found. Run src/03_inference.R first.")
+if (!file.exists(input_file)) stop("Step 04 output not found. Run src/04_network_inference.R first.")
 
 INFERENCE <- readRDS(input_file)
 res_ctrl <- INFERENCE$ctrl_network
 res_case <- INFERENCE$case_network
 
 # 2. Prepare Output Directory
-out_dir <- file.path(config$output_root, "04_network_analysis")
+out_dir <- file.path(config$output_root, "05_network_topology")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 # 3. Network Topology Analysis (Excel)
@@ -118,4 +118,4 @@ if(!is.null(topo_case)) {
 }
 
 message(sprintf("   -> Cytoscape files saved to: %s", cyto_dir))
-message("=== STEP 4 COMPLETE ===\n")
+message("=== STEP 5 COMPLETE ===\n")

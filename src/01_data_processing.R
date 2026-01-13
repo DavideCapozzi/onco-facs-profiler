@@ -1,6 +1,6 @@
-# src/01_ingest.R
+# src/01_data_processing.R
 # ==============================================================================
-# STEP 01: DATA INGESTION & HYBRID CODA PREPROCESSING (REFACTORED V2)
+# STEP 01: DATA INGESTION + QC + HYBRID CODA PREPROCESSING 
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -13,7 +13,7 @@ source("R/utils_io.R")
 source("R/modules_coda.R")
 source("R/modules_qc.R")   
 
-message("\n=== PIPELINE STEP 1: INGESTION & HYBRID TRANSFORM (BPCA) ===")
+message("\n=== PIPELINE STEP 1: INGESTION + QC + HYBRID TRANSFORM (BPCA) ===")
 
 # 1. Load Config & Data
 # ------------------------------------------------------------------------------
@@ -63,7 +63,7 @@ valid_patients <- rownames(mat_raw)
 raw_data <- raw_data %>% filter(Patient_ID %in% valid_patients)
 
 # Save QC Report
-out_dir <- file.path(config$output_root, "01_QC")
+out_dir <- file.path(config$output_root, "01_data_processing")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 save_qc_report(qc_summary, file.path(out_dir, "QC_Filtering_Report.xlsx"))
 

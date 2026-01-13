@@ -1,6 +1,6 @@
-# src/03_inference.R
+# src/04_network_inference.R
 # ==============================================================================
-# STEP 03: NETWORK INFERENCE (BOOTSTRAP & PERMUTATION)
+# STEP 04: NETWORK INFERENCE (BOOTSTRAP & PERMUTATION)
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -14,14 +14,14 @@ suppressPackageStartupMessages({
 source("R/utils_io.R")          
 source("R/modules_network.R")   
 
-message("\n=== PIPELINE STEP 3: ROBUST NETWORK INFERENCE ===")
+message("\n=== PIPELINE STEP 4: ROBUST NETWORK INFERENCE ===")
 
 # 1. Load Config & Data
 # ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
-input_file <- file.path(config$output_root, "01_QC", "data_processed.rds")
+input_file <- file.path(config$output_root, "01_data_processing", "data_processed.rds")
 
-if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_ingest.R first.")
+if (!file.exists(input_file)) stop("Step 01 output not found. Run src/01_data_processing.R first.")
 
 DATA <- readRDS(input_file)
 
@@ -30,11 +30,6 @@ df_input <- DATA$hybrid_data_z
 
 if (is.null(DATA$hybrid_markers)) stop("Critical: 'hybrid_markers' whitelist missing in data_processed.rds. Re-run Step 1.")
 markers <- DATA$hybrid_markers
-
-# Check for Step 02 (Adversarial check for robustness)
-if (!dir.exists(file.path(config$output_root, "02_exploratory"))) {
-  warning("[Warning] Step 02 output not found. It is highly recommended to check PERMANOVA results in Step 02 before interpreting networks.")
-}
 
 # 2. Prepare Data Subsets
 # ------------------------------------------------------------------------------
@@ -211,7 +206,7 @@ if(nrow(edges_indices) > 0) {
 
 # 8. Save Outputs
 # ------------------------------------------------------------------------------
-out_dir <- file.path(config$output_root, "03_networks")
+out_dir <- file.path(config$output_root, "04_network_inference")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 wb_diff <- createWorkbook()
@@ -230,4 +225,4 @@ saveRDS(final_obj, file.path(out_dir, "inference_results.rds"))
 
 message(sprintf("[Output] Found %d significantly differential edges (FDR < %.2f)", 
                 sum(results_table$Significant_Diff), config$stats$fdr_threshold))
-message("=== STEP 3 COMPLETE ===\n")
+message("=== STEP 4 COMPLETE ===\n")
