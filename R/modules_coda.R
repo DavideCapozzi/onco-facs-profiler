@@ -213,6 +213,116 @@ coda_transform_logit <- function(mat, epsilon = 1e-6) {
   return(logit_mat)
 }
 
+#' @title Perform Hybrid Transformation Pipeline
+#' @description 
+#' Orchestrates the complete transformation logic:
+#' 1. Splits markers into Compositional (Track A) and Functional (Track B) based on config.
+#' 2. Track A: Zero replacement (CZM) -> CLR transformation.
+#' 3. Track B: LOD Zero handling -> Logit transformation -> BPCA imputation.
+#' 4. Merges tracks and performs Z-score standardization.
+#' 5. Computes ILR balances for compositional groups.
+#' 
+#' @param mat_raw Raw numeric matrix (Samples x Markers). Post-QC.
+#' @param config The configuration list containing 'hybrid_groups'.
+#' @return A list containing:
+#'   - hybrid_data_raw: Merged matrix (Transformed/Imputed but NOT scaled).
+#'   - hybrid_data_z: Merged matrix (Transformed/Imputed AND Z-scored).
+#'   - ilr_balances: List of ILR coordinates for defined groups.
+#'   - hybrid_markers: Vector of final marker names.
+#' @export
+perform_hybrid_transformation <- function(mat_raw, config) {
+  
+  message("\n[CoDa] Starting Hybrid Strategy (Compositional vs Functional)...")
+  
+  # 1. Split Markers
+  all_current_markers <- colnames(mat_raw)
+  comp_markers_list <- unique(unlist(config$hybrid_groups))
+  comp_markers <- intersect(all_current_markers, comp_markers_list)
+  func_markers <- setdiff(all_current_markers, comp_markers)
+  
+  message(sprintf("   [Strategy] Split: %d Compositional (CLR) vs %d Functional (Logit+BPCA)", 
+                  length(comp_markers), length(func_markers)))
+  
+  mat_comp_trans <- NULL
+  mat_func_trans <- NULL
+  ilr_results <- list()
+  
+  # --- TRACK A: Compositional Markers (CZM -> CLR) ---
+  if (length(comp_markers) > 0) {
+    message("   [Track A] Processing Compositional Groups...")
+    mat_comp_raw <- mat_raw[, comp_markers, drop = FALSE]
+    
+    # A1. Zero Replacement (CZM)
+    mat_comp_clean <- coda_replace_zeros(mat_comp_raw)
+    
+    # A2. Handle remaining NAs (Multiplicative Replacement)
+    if (any(is.na(mat_comp_clean))) {
+      message("      -> Imputing remaining NAs in composition (multRepl)...")
+      mat_comp_clean <- zCompositions::multRepl(mat_comp_clean, label = NA, imp.missing = TRUE)
+    }
+    
+    # A3. CLR Transformation (Global)
+    mat_comp_trans <- coda_transform_clr(mat_comp_clean)
+    
+    # A4. Compute ILR Balances (for Stats)
+    # We use the cleaned counts (mat_comp_clean) before CLR
+    ilr_results <- coda_compute_local_ilr(mat_comp_clean, config$hybrid_groups)
+  }
+  
+  # --- TRACK B: Functional Markers (LOD -> Logit -> BPCA) ---
+  if (length(func_markers) > 0) {
+    message("   [Track B] Processing Functional Markers...")
+    mat_func_raw <- mat_raw[, func_markers, drop = FALSE]
+    
+    # B1. Zero Handling (LOD Proxy: Min/2)
+    mat_func_lod <- mat_func_raw
+    for (j in 1:ncol(mat_func_lod)) {
+      col_vals <- mat_func_lod[, j]
+      zero_idx <- which(col_vals == 0 & !is.na(col_vals))
+      
+      if (length(zero_idx) > 0) {
+        pos_vals <- col_vals[col_vals > 0 & !is.na(col_vals)]
+        lod_proxy <- if(length(pos_vals) > 0) min(pos_vals)/2 else 1e-6
+        mat_func_lod[zero_idx, j] <- lod_proxy
+      }
+    }
+    
+    # B2. Logit Transformation
+    mat_func_logit <- coda_transform_logit(mat_func_lod)
+    
+    # B3. BPCA Imputation
+    mat_func_trans <- impute_matrix_bpca(mat_func_logit, nPcs = 8)
+  }
+  
+  # --- MERGE & NORMALIZE ---
+  message("[Merge] Recombining and creating final matrices...")
+  
+  list_parts <- list()
+  if (!is.null(mat_comp_trans)) list_parts[[1]] <- mat_comp_trans
+  if (!is.null(mat_func_trans)) list_parts[[2]] <- mat_func_trans
+  
+  if (length(list_parts) == 0) stop("[FATAL] No data remaining after filtering.")
+  
+  mat_hybrid_raw <- do.call(cbind, list_parts)
+  
+  # Restore alphabetic column order
+  mat_hybrid_raw <- mat_hybrid_raw[, sort(colnames(mat_hybrid_raw)), drop = FALSE]
+  
+  # Z-Score Standardization
+  message("   [Norm] Applying Z-Score Standardization...")
+  mat_hybrid_z <- scale(mat_hybrid_raw)
+  attr(mat_hybrid_z, "scaled:center") <- NULL
+  attr(mat_hybrid_z, "scaled:scale") <- NULL
+  mat_hybrid_z <- as.matrix(mat_hybrid_z)
+  
+  return(list(
+    hybrid_data_raw = mat_hybrid_raw,
+    hybrid_data_z = mat_hybrid_z,
+    ilr_balances = ilr_results,
+    hybrid_markers = colnames(mat_hybrid_z)
+  ))
+}
+
 #' @title Bayesian PCA Imputation (Wrapper)
 #' @description 
 #' Imputes missing values using Bayesian PCA (pcaMethods::bpca).
