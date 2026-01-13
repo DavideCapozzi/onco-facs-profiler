@@ -494,7 +494,7 @@ viz_plot_signature_boxplots <- function(data_matrix, group_factor, loadings_df,
   return(p)
 }
 
-#' @title Report sPLS-DA Visualization (Comprehensive & Auto-Sensing)
+#' @title Report sPLS-DA Visualization 
 #' @description 
 #' Generates a comprehensive PDF report for sPLS-DA results.
 #' Automatically detects group direction and resolves colors robustly.
@@ -568,7 +568,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     pos_group_name <- names(group_means)[which.max(group_means)]
     neg_group_name <- names(group_means)[which.min(group_means)]
     
-    label_sub <- sprintf("Auto-Detected Direction: Positive (>0) -> %s | Negative (<0) -> %s", 
+    label_sub <- sprintf("Direction: Positive -> %s | Negative -> %s", 
                          pos_group_name, neg_group_name)
     
     current_fill_colors <- c()
@@ -580,7 +580,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     if (nrow(df_comp) > 0) {
       df_comp$Association <- ifelse(df_comp[[comp_col]] > 0, pos_group_name, neg_group_name)
       
-      # 2. Loading Plot (Fixed ggplot warnings with .data)
+      # 2. Loading Plot 
       p_load <- ggplot(df_comp, aes(x = reorder(Marker, abs(.data[[comp_col]])), 
                                     y = .data[[comp_col]], 
                                     fill = Association)) +
