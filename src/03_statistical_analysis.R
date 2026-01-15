@@ -69,7 +69,7 @@ if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 # Initialize Excel Workbook
 wb <- createWorkbook()
 
-# 2. Global PERMANOVA
+# 2a. Global PERMANOVA
 # ------------------------------------------------------------------------------
 message("[Stats] Running Global PERMANOVA...")
 
@@ -83,6 +83,37 @@ perm_global <- test_coda_permanova(
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
+# 2b. Global Dispersion Check (Betadisper)
+# ------------------------------------------------------------------------------
+message("[Stats] Running Global Dispersion Check (Homogeneity Assumption)...")
+
+tryCatch({
+  # Use the same df_stats_global defined for PERMANOVA
+  disp_global <- test_coda_dispersion(
+    data_input = df_stats_global, 
+    group_col = "Group", 
+    n_perm = config$stats$n_perm
+  )
+  
+  # Add sheets for Dispersion results
+  addWorksheet(wb, "Global_Dispersion_Test")
+  writeData(wb, "Global_Dispersion_Test", disp_global$anova_table, rowNames = TRUE)
+  
+  addWorksheet(wb, "Global_Dispersion_Distances")
+  writeData(wb, "Global_Dispersion_Distances", disp_global$group_distances)
+  
+  # Log quick interpretation to console
+  p_disp <- disp_global$anova_table$`Pr(>F)`[1]
+  if (p_disp < 0.05) {
+    message(sprintf("   [WARNING] Dispersion test SIGNIFICANT (p=%.4f). Groups have different variances.", p_disp))
+    message("             Interpret PERMANOVA location effects with caution.")
+  } else {
+    message(sprintf("   [PASS] Dispersion test non-significant (p=%.4f). Homogeneity assumption holds.", p_disp))
+  }
+  
+}, error = function(e) {
+  message(paste("   [ERROR] Beta-Dispersion test failed:", e$message))
+})
 
 # 3. sPLS-DA (Driver Analysis)
 # ------------------------------------------------------------------------------
