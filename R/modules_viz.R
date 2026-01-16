@@ -497,15 +497,15 @@ viz_plot_signature_boxplots <- function(data_matrix, group_factor, loadings_df,
 #' @title Report sPLS-DA Visualization 
 #' @description 
 #' Generates a comprehensive PDF report for sPLS-DA results.
-#' Automatically detects group direction and resolves colors robustly.
-#' Fixed ggplot2 warnings using .data pronoun.
+#' Includes robust error handling for PDF device closing.
 #' 
 #' @param pls_res The result object from run_splsda_model.
 #' @param drivers_df Dataframe of extracted loadings.
-#' @param metadata_viz Dataframe for plotting (Original detailed groups).
-#' @param colors_viz Named vector of colors for metadata_viz groups.
+#' @param metadata_viz Dataframe for plotting.
+#' @param colors_viz Named vector of colors for groups.
 #' @param out_path Path to save the PDF.
-viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path) {
+#' @param group_col The name of the metadata column to use for grouping/coloring (default: "Group").
+viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path, group_col = "Group") {
   
   if (is.null(pls_res$model)) return(NULL)
   
@@ -516,30 +516,38 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
   
   message(sprintf("   [Viz] Generating sPLS-DA graphical report: %s", basename(out_path)))
   
-  pdf(out_path, width = 11, height = 8)
-  
-  # Setup data for plotting
-  plot_group_factor <- as.factor(metadata_viz$Group)
-  plot_colors <- colors_viz[levels(plot_group_factor)]
-  n_comps <- pls_res$model$ncomp
-  
-  # --- HELPER: Smart Color Resolution ---
-  resolve_color <- function(grp_name, palette) {
-    if (grp_name %in% names(palette)) return(palette[[grp_name]])
-    # Synonym Handling
-    if (grp_name %in% c("Control", "Reference", "Healthy_Ctrl")) {
-      candidates <- c("Healthy", "HD", "Healthy_Donors", "Control")
-      for(c in candidates) if(c %in% names(palette)) return(palette[[c]])
-      return(palette[[1]])
-    }
-    if (grp_name %in% c("Case", "Target", "Disease")) {
-      if("Case" %in% names(palette)) return(palette[["Case"]])
-      return(palette[[length(palette)]])
-    }
-    return("gray50") 
+  # Validate column existence immediately
+  if (!group_col %in% names(metadata_viz)) {
+    stop(sprintf("Column '%s' not found in metadata for sPLS-DA visualization.", group_col))
   }
   
+  # [FIX] Open PDF and ensure it closes using on.exit immediately
+  pdf(out_path, width = 11, height = 8)
+  # This ensures dev.off() is called even if the code below crashes
+  on.exit(try(dev.off(), silent = TRUE), add = TRUE) 
+  
+  # Setup data for plotting
+  # Use the dynamic column specified by group_col
+  plot_group_factor <- as.factor(metadata_viz[[group_col]])
+  
+  # Map colors safely
+  # We subset colors_viz by the levels present in the data to avoid mismatches
+  levels_present <- levels(plot_group_factor)
+  plot_colors <- colors_viz[levels_present]
+  
+  # Fallback for missing colors
+  if (any(is.na(plot_colors))) {
+    missing_grps <- levels_present[is.na(plot_colors)]
+    warning(paste("Missing colors for:", paste(missing_grps, collapse=", ")))
+    # Assign gray to missing colors
+    plot_colors[is.na(plot_colors)] <- "gray50"
+    names(plot_colors) <- levels_present
+  }
+  
+  n_comps <- pls_res$model$ncomp
+  
   # 1. Indiv Biplot
+  # Note: mixOmics plotIndiv usually expects 'group' as a vector matching X rows
   tryCatch({
     mixOmics::plotIndiv(pls_res$model, 
                         comp = c(1,2), 
@@ -548,21 +556,21 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
                         ellipse = TRUE, 
                         legend = TRUE, 
                         title = "sPLS-DA: Model Separation",
-                        subtitle = "Ellipses indicate 95% confidence region",
+                        subtitle = paste("Grouping by:", group_col),
                         star.plot = TRUE)
   }, error = function(e) {
     plot.new(); text(0.5, 0.5, paste("Biplot Error:", e$message))
   })
   
-  # Iterate over components
+  # Iterate over components for Loadings
   for (i in 1:n_comps) {
     
     comp_col <- paste0("Comp", i, "_Weight")
     if (!comp_col %in% names(drivers_df)) next
     
-    # Auto-Detection Logic
+    # Auto-Detection Logic for Association Direction
     variates <- pls_res$model$variates$X[, i]
-    stat_groups <- pls_res$model$Y 
+    stat_groups <- plot_group_factor
     group_means <- tapply(variates, stat_groups, mean)
     
     pos_group_name <- names(group_means)[which.max(group_means)]
@@ -571,13 +579,19 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     label_sub <- sprintf("Direction: Positive -> %s | Negative -> %s", 
                          pos_group_name, neg_group_name)
     
+    # Prepare fill colors for the bar plot
     current_fill_colors <- c()
-    current_fill_colors[[pos_group_name]] <- resolve_color(pos_group_name, colors_viz)
-    current_fill_colors[[neg_group_name]] <- resolve_color(neg_group_name, colors_viz)
+    if(pos_group_name %in% names(plot_colors)) current_fill_colors[[pos_group_name]] <- plot_colors[[pos_group_name]]
+    if(neg_group_name %in% names(plot_colors)) current_fill_colors[[neg_group_name]] <- plot_colors[[neg_group_name]]
+    
+    # Fill missing with gray if necessary
+    if(is.null(current_fill_colors[[pos_group_name]])) current_fill_colors[[pos_group_name]] <- "gray"
+    if(is.null(current_fill_colors[[neg_group_name]])) current_fill_colors[[neg_group_name]] <- "gray"
     
     df_comp <- drivers_df[abs(drivers_df[[comp_col]]) > 0, ]
     
     if (nrow(df_comp) > 0) {
+      # Determine association based on weight sign
       df_comp$Association <- ifelse(df_comp[[comp_col]] > 0, pos_group_name, neg_group_name)
       
       # 2. Loading Plot 
@@ -594,28 +608,30 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
         theme_coda() + theme(legend.position = "bottom")
       print(p_load)
       
-      # 3. Signature Boxplots
-      p_box <- viz_plot_signature_boxplots(
-        data_matrix = pls_res$model$X, 
-        group_factor = plot_group_factor,
-        loadings_df = df_comp, 
-        comp = i, 
-        n_top = 9, 
-        colors = plot_colors
-      )
-      if (!is.null(p_box)) print(p_box)
+      # 3. Signature Boxplots (Helper function assumed to be present)
+      if(exists("viz_plot_signature_boxplots")) {
+        p_box <- viz_plot_signature_boxplots(
+          data_matrix = pls_res$model$X, 
+          group_factor = plot_group_factor,
+          loadings_df = df_comp, 
+          comp = i, 
+          n_top = 9, 
+          colors = plot_colors
+        )
+        if (!is.null(p_box)) print(p_box)
+      }
     }
   }
   
   # 4. Clustered Image Map (CIM)
   if (nrow(drivers_df) > 1) {
     tryCatch({
-      # Apply smart color resolution to row side colors
-      # This fixes the issue where "Healthy" became gray because it didn't match "Control"
-      groups_vec <- as.character(metadata_viz$Group)
-      unique_grps <- unique(groups_vec)
-      row_cols_map <- setNames(sapply(unique_grps, function(g) resolve_color(g, colors_viz)), unique_grps)
-      row_cols <- row_cols_map[groups_vec]
+      # Map row side colors using the correctly matched vectors
+      groups_vec <- as.character(metadata_viz[[group_col]])
+      row_cols <- plot_colors[groups_vec]
+      
+      # Check for NAs in colors before plotting
+      row_cols[is.na(row_cols)] <- "grey"
       
       mixOmics::cim(pls_res$model, 
                     row.sideColors = row_cols,
@@ -627,7 +643,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     })
   }
   
-  dev.off()
+  # dev.off() is handled by on.exit() automatically
 }
 
 #' @title Save sPLS-DA Loadings Report (Multi-Page) - FIXED & DECOUPLED

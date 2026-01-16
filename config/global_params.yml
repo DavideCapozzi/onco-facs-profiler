@@ -3,41 +3,35 @@
 # ==============================================================================
 
 # --- Setup ---
-
 output_root: "results"
-
 project_name: "longsurvivors"
 input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
+
+# --- ANALYSIS TARGETS (Single Source of Truth) ---
+# Define here exactly which groups you want to analyze and color.
+# If using stratification (see below), use the suffixed names (e.g., "NSCLC_LS").
+control_group: "Healthy"
+case_groups: ["NSCLC_LS", "NSCLC_Std", "HNSCC_LS", "HNSCC_Std"]  # Dynamic: Add/Remove groups here. 
+
+# --- STRATIFICATION LOGIC ---
+# How to build the group labels from metadata?
+stratification:
+  mode: "stratified_ls"         # Options: "original" (no change), "stratified_ls" (split by pattern), "binary" (Control vs Case)
+  column: "Original_Source"     # Metadata column to check
+  pattern: "_LS"                # Pattern to identify the subgroup
+  suffix_match: "_LS"           # Suffix for matching samples
+  suffix_no_match: "_Std"       # Suffix for non-matching samples
+
+# --- COHORTS MAPPING ---
 cohorts:
   NSCLC: "NSCLC"
   HNSCC: "HNSCC"
   Healthy: "Healthy_Donors"
-# Analysis Groupings
-control_group: "Healthy"
-case_groups: ["NSCLC", "HNSCC"]
-
-# project_name: "immunerange"
-# input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/Healthy_immune_range/DATABASE_LS_standardizzato.xlsx"
-# cohorts:
-#   DS_Duraclone: "DS_Duraclone"
-#   Healthy: "DS_Chiara"
-# # Analysis Groupings
-# control_group: "Healthy"
-# case_groups: ["DS_Duraclone"]
-
-# --- Analysis Design ---
-analysis_design:
-  # mode: "distinct"      # Keeps groups separate: Healthy vs NSCLC vs HNSCC
-  mode: "binary"          # Merges into 2 groups: Control vs Case
-  # mode: "stratified_ls" # Splits Case into: Case_LS vs Case_Std vs Control
-  
-  ls_pattern: "_LS"       # Pattern to identify Long Survivors in subgroup_col
 
 marker_selection:
   whitelist: []      
-  blacklist: [] #["PD1", "PD1CD4", "PD1CD8", "CD137CD8", "CD137PD1", "CD8"]       
+  blacklist: [] 
 
-  
 hybrid_groups:
   Differentiation: ["CM", "EFF", "EM", "NAIVE"]
   Lineage: ["CD4", "CD8"]  
@@ -45,39 +39,63 @@ hybrid_groups:
   
 metadata:
   subgroup_col: "Original_Source"
-  
-# --- Visuals ---
+
+# --- VISUALS & COLORS ---
+# Qui definisci i colori per TUTTI i possibili nomi (Sia Macro che Micro).
+# Così Step 2 trova "NSCLC" e Step 3 trova "NSCLC_LS".
 colors:
-  control: "#2E8B57"         # SeaGreen (assigned to control_group)
-  cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] # Assigned to case_groups in order
-  highlight: "#FFD700"       # Gold (for subgroups matching highlight_pattern)
-  Case: "#CD5C5C"           # Indian red Fallback
+  control: "#2E8B57"         # Healthy
+  Case: "#B22222"
+
+  # Definiamo colori espliciti per evitare confusioni
+  groups:
+    # Gruppi MACRO (Per Step 2 - Distribuzioni Unite)
+    NSCLC: "#CD5C5C"         # Rosso Indiano
+    HNSCC: "#4682B4"         # Blu Acciaio
+    
+    # Gruppi MICRO (Per Step 3/4 - Se vuoi colori specifici, altrimenti eredita)
+    NSCLC_LS: "#B22222"      # Rosso Scuro (Firebrick)
+    NSCLC_Std: "#FA8072"     # Rosso Chiaro (Salmon)
+    HNSCC_LS: "#000080"      # Blu Scuro (Navy)
+    HNSCC_Std: "#87CEFA"     # Blu Chiaro (LightSkyBlue)
+
+  # Palette di riserva (lasciala per sicurezza)
+  cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] 
+  
+  highlight: "#FFD700"       # Oro (Per i punti LS nello Step 2)
+
+# # Colors are applied dynamically to the groups defined in 'case_groups' above.
+# colors:
+#   control: "#2E8B57"         # SeaGreen (Always assigned to control_group)
+#   # The palette below is assigned in order to the groups in 'case_groups'
+#   cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"]  
+#  highlight: "#FFD700"       # Gold (for specific highlighting if needed)
 
   heatmap:
-    low: "#2166AC"    # Cool Blue
-    mid: "#F7F7F7"    # White
-    high: "#B2182B"   # Warm Red
+    low: "#2166AC"    
+    mid: "#F7F7F7"    
+    high: "#B2182B"   
   
   plsda:
-    positive: "#CD5C5C" # Color for Positive Association
-    negative: "#4682B4" # Color for Negative Association
+    positive: "#CD5C5C" 
+    negative: "#4682B4" 
     
   distribution:
     mean: "darkred"
     median: "black"
 
 viz:
-  min_edge_weight: 0.15 # Edges with absolute value less than this will be hidden
+  min_edge_weight: 0.15 
   heatmap_metadata: ["Group", "Original_Source"]
   merge_case_groups: false
   highlight_pattern: "_LS"
 
 # --- Quality Control ---
 qc:
-  max_na_row_pct: 0.55  # Drop patients with NA percentage higher than this  
-  max_na_col_pct: 0.20  # Drop markerswith NA percentage higher than this  
+  max_na_row_pct: 0.55   
+  max_na_col_pct: 0.20  
   remove_outliers: true
-  outlier_conf_level: 0.99 # Drops samples outside x% confidence interval (Mahalanobis)
+  outlier_conf_level: 0.99 
 
 # --- Imputation (CoDa) ---
 imputation:
@@ -86,15 +104,15 @@ imputation:
 # --- Multivariate & Interpretation ---
 multivariate:
   run_plsda: true
-  n_comp: 2           # Number of components for PLS-DA
-  validation_folds: 5 # For cross-validation (if n samples allow)
-  top_n_loadings: 15  # How many top markers to report in the summary
+  n_comp: 2           
+  validation_folds: 5 
+  top_n_loadings: 15  
 
 # --- Inference Statistics ---
 stats:
   seed: 2025
-  n_boot: 1000        # Bootstrap iterations
-  n_perm: 2000        # Permutation iterations
-  alpha: 0.05         # Significance level
-  fdr_threshold: 0.1 # BH Correction
-  n_cores: "auto"     # "auto" uses detectCores() - 1
+  n_boot: 1000        
+  n_perm: 2000        
+  alpha: 0.05         
+  fdr_threshold: 0.1 
+  n_cores: "auto"

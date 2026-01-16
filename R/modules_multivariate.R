@@ -51,7 +51,6 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
   list_keepX <- unique(list_keepX)
   
   # Run Tuning (tune.splsda)
-  # using nrepeat=10 for robustness in estimation
   tune_splsda <- mixOmics::tune.splsda(
     X = X, 
     Y = Y, 
@@ -61,7 +60,7 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
     folds = folds, 
     dist = "max.dist", 
     progressBar = FALSE,
-    nrepeat = 10 
+    nrepeat = 50
   )
   
   choice_keepX <- tune_splsda$choice.keepX
