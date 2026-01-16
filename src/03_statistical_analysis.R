@@ -225,28 +225,56 @@ if (length(ilr_list) > 0) {
   
   for (grp_name in names(ilr_list)) {
     mat_ilr <- ilr_list[[grp_name]]
-    common_ids <- intersect(rownames(df_global), rownames(mat_ilr))
     
-    if (length(common_ids) < 3) next 
+    # [ROBUST MATCHING]
+    # We intersect the Patient_ID column (from df_global) with rownames (from mat_ilr).
+    # This works because we fixed modules_coda.R to preserve rownames in ILR matrices.
+    common_ids <- intersect(df_global$Patient_ID, rownames(mat_ilr))
     
-    df_stats_local <- cbind(data.frame(Group = df_global[common_ids, "Group"]), 
-                            as.data.frame(mat_ilr[common_ids, , drop=FALSE]))
+    if (length(common_ids) < 3) {
+      message(sprintf("   [Skip] Group %s: Insufficient matching samples (%d)", grp_name, length(common_ids)))
+      next 
+    }
     
-    res_perm <- test_coda_permanova(df_stats_local, group_col = "Group", n_perm = config$stats$n_perm)
+    # 1. Subset ILR matrix (ensure matching rows)
+    mat_ilr_sub <- mat_ilr[common_ids, , drop=FALSE]
     
-    summary_local <- rbind(summary_local, data.frame(
-      SubGroup = grp_name,
-      P_Value = res_perm$`Pr(>F)`[1],
-      R2_Percent = res_perm$R2[1] * 100,
-      F_Model = res_perm$F[1]
-    ))
+    # 2. Extract corresponding groups from global df (aligned by ID)
+    match_idx <- match(common_ids, df_global$Patient_ID)
+    group_sub <- df_global$Group[match_idx]
     
-    sheet_name <- substr(paste0("ILR_", grp_name), 1, 31)
-    addWorksheet(wb, sheet_name)
-    writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
+    # 3. Create local dataframe for PERMANOVA
+    df_stats_local <- cbind(data.frame(Group = group_sub), as.data.frame(mat_ilr_sub))
+    
+    # 4. Run PERMANOVA
+    res_perm <- tryCatch({
+      test_coda_permanova(df_stats_local, group_col = "Group", n_perm = config$stats$n_perm)
+    }, error = function(e) {
+      message(sprintf("      [Error] PERMANOVA failed for %s: %s", grp_name, e$message))
+      return(NULL)
+    })
+    
+    if (!is.null(res_perm)) {
+      # Append to summary
+      summary_local <- rbind(summary_local, data.frame(
+        SubGroup = grp_name,
+        P_Value = res_perm$`Pr(>F)`[1],
+        R2_Percent = res_perm$R2[1] * 100,
+        F_Model = res_perm$F[1]
+      ))
+      
+      # Save individual sheet (Safe sheet naming)
+      sheet_name <- substr(paste0("ILR_", grp_name), 1, 31)
+      if(!sheet_name %in% names(wb)) addWorksheet(wb, sheet_name)
+      writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
+    }
   }
-  addWorksheet(wb, "Summary_Local_Tests")
-  writeData(wb, "Summary_Local_Tests", summary_local)
+  
+  # Save Summary Sheet
+  if(nrow(summary_local) > 0) {
+    if(!"Summary_Local_Tests" %in% names(wb)) addWorksheet(wb, "Summary_Local_Tests")
+    writeData(wb, "Summary_Local_Tests", summary_local)
+  }
 }
 
 saveWorkbook(wb, file.path(out_dir, "Statistical_Test_Results.xlsx"), overwrite = TRUE)

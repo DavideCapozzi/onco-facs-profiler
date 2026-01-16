@@ -222,17 +222,24 @@ coda_transform_logit <- function(mat, epsilon = 1e-6) {
 #' 4. Merges tracks and performs Z-score standardization.
 #' 5. Computes ILR balances for compositional groups.
 #' 
+#' @title Perform Hybrid Transformation Pipeline
+#' @description 
+#' Orchestrates the complete transformation logic with strict rowname preservation.
+#' 1. Splits markers into Compositional (Track A) and Functional (Track B).
+#' 2. Track A: CZM Zero Replacement -> Rowname Restore -> CLR -> ILR.
+#' 3. Track B: LOD -> Logit -> BPCA.
+#' 
 #' @param mat_raw Raw numeric matrix (Samples x Markers). Post-QC.
 #' @param config The configuration list containing 'hybrid_groups'.
-#' @return A list containing:
-#'   - hybrid_data_raw: Merged matrix (Transformed/Imputed but NOT scaled).
-#'   - hybrid_data_z: Merged matrix (Transformed/Imputed AND Z-scored).
-#'   - ilr_balances: List of ILR coordinates for defined groups.
-#'   - hybrid_markers: Vector of final marker names.
+#' @return A list containing transformed matrices and ILR balances.
 #' @export
 perform_hybrid_transformation <- function(mat_raw, config) {
   
   message("\n[CoDa] Starting Hybrid Strategy (Compositional vs Functional)...")
+  
+  # Safety: Capture original rownames to restore them later if lost
+  rn_safe <- rownames(mat_raw)
+  if (is.null(rn_safe)) stop("[FATAL] Input matrix 'mat_raw' lacks rownames (Patient IDs).")
   
   # 1. Split Markers
   all_current_markers <- colnames(mat_raw)
@@ -254,18 +261,19 @@ perform_hybrid_transformation <- function(mat_raw, config) {
     
     # A1. Zero Replacement (CZM)
     mat_comp_clean <- coda_replace_zeros(mat_comp_raw)
+    rownames(mat_comp_clean) <- rn_safe # Force Restore
     
     # A2. Handle remaining NAs (Multiplicative Replacement)
     if (any(is.na(mat_comp_clean))) {
       message("      -> Imputing remaining NAs in composition (multRepl)...")
       mat_comp_clean <- zCompositions::multRepl(mat_comp_clean, label = NA, imp.missing = TRUE)
+      rownames(mat_comp_clean) <- rn_safe # Force Restore
     }
     
     # A3. CLR Transformation (Global)
     mat_comp_trans <- coda_transform_clr(mat_comp_clean)
     
-    # A4. Compute ILR Balances (for Stats)
-    # We use the cleaned counts (mat_comp_clean) before CLR
+    # A4. Compute ILR Balances (Using cleaned counts with rownames)
     ilr_results <- coda_compute_local_ilr(mat_comp_clean, config$hybrid_groups)
   }
   
@@ -276,15 +284,15 @@ perform_hybrid_transformation <- function(mat_raw, config) {
     
     # B1. Zero Handling (LOD Proxy: Min/2)
     mat_func_lod <- mat_func_raw
+    # Vectorized zero check for efficiency
+    mins <- apply(mat_func_lod, 2, function(x) {
+      pos <- x[x > 0 & !is.na(x)]
+      if(length(pos) > 0) min(pos)/2 else 1e-6
+    })
+    
     for (j in 1:ncol(mat_func_lod)) {
-      col_vals <- mat_func_lod[, j]
-      zero_idx <- which(col_vals == 0 & !is.na(col_vals))
-      
-      if (length(zero_idx) > 0) {
-        pos_vals <- col_vals[col_vals > 0 & !is.na(col_vals)]
-        lod_proxy <- if(length(pos_vals) > 0) min(pos_vals)/2 else 1e-6
-        mat_func_lod[zero_idx, j] <- lod_proxy
-      }
+      zeros <- which(mat_func_lod[, j] == 0 & !is.na(mat_func_lod[, j]))
+      if (length(zeros) > 0) mat_func_lod[zeros, j] <- mins[j]
     }
     
     # B2. Logit Transformation
@@ -292,6 +300,7 @@ perform_hybrid_transformation <- function(mat_raw, config) {
     
     # B3. BPCA Imputation
     mat_func_trans <- impute_matrix_bpca(mat_func_logit, nPcs = 8)
+    rownames(mat_func_trans) <- rn_safe # Force Restore
   }
   
   # --- MERGE & NORMALIZE ---
@@ -304,8 +313,6 @@ perform_hybrid_transformation <- function(mat_raw, config) {
   if (length(list_parts) == 0) stop("[FATAL] No data remaining after filtering.")
   
   mat_hybrid_raw <- do.call(cbind, list_parts)
-  
-  # Restore alphabetic column order
   mat_hybrid_raw <- mat_hybrid_raw[, sort(colnames(mat_hybrid_raw)), drop = FALSE]
   
   # Z-Score Standardization
@@ -314,6 +321,7 @@ perform_hybrid_transformation <- function(mat_raw, config) {
   attr(mat_hybrid_z, "scaled:center") <- NULL
   attr(mat_hybrid_z, "scaled:scale") <- NULL
   mat_hybrid_z <- as.matrix(mat_hybrid_z)
+  rownames(mat_hybrid_z) <- rn_safe # Final Safety Check
   
   return(list(
     hybrid_data_raw = mat_hybrid_raw,
