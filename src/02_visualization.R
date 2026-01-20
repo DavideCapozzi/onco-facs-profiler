@@ -26,53 +26,52 @@ DATA <- readRDS(input_file)
 
 # 2. Data Setup & Filtering
 # ------------------------------------------------------------------------------
-# Update the main grouping variable based on the stratification column
 strat_col <- config$stratification$column
 if (!strat_col %in% names(DATA$metadata)) {
   stop(sprintf("Column '%s' not found in metadata.", strat_col))
 }
 
-# Overwrite Group with the specific analysis column
-DATA$metadata$Group <- DATA$metadata[[strat_col]]
-DATA$hybrid_data_z$Group <- DATA$hybrid_data_z[[strat_col]]
+# Define target subgroups (Robust concatenation of vectors)
+target_subgroups <- unique(c(config$control_group, config$case_groups))
+message(sprintf("[Viz] Filtering dataset for targets: %s", paste(target_subgroups, collapse=", ")))
 
-# Define target groups from configuration
-target_groups <- c(config$control_group, config$case_groups)
-message(sprintf("[Viz] Filtering dataset for targets: %s", paste(target_groups, collapse=", ")))
-
-# Filter Metadata
+# Filter metadata 
+# Note: We filter by strat_col but keep the original Macro-Group column structure
 meta_viz <- DATA$metadata %>% 
-  filter(Group %in% target_groups) %>%
-  mutate(Group = factor(Group, levels = target_groups))
+  filter(.data[[strat_col]] %in% target_subgroups)
 
-# Filter Z-Score Matrix
+# Align matrices
 mat_z_global <- DATA$hybrid_data_z %>%
   filter(Patient_ID %in% meta_viz$Patient_ID) %>%
   select(all_of(DATA$hybrid_markers)) %>%
   as.matrix()
 
-# Filter Raw Matrix
 raw_matrix <- DATA$raw_matrix[meta_viz$Patient_ID, , drop = FALSE]
 
 # Validation
-if (nrow(meta_viz) < 3) stop("Insufficient samples after filtering (<3). Check config group names.")
-message(sprintf("[Viz] Analyzed Set: %d Samples across %d Groups", nrow(meta_viz), length(unique(meta_viz$Group))))
+if (nrow(meta_viz) < 3) stop("Insufficient samples after filtering (<3). Check config.")
+message(sprintf("[Viz] Analyzed Set: %d Samples across %d Macro-Groups", 
+                nrow(meta_viz), length(unique(meta_viz$Group))))
 
-# 3. Colors Setup
+# 3. Colors Setup (Robust Fix)
 # ------------------------------------------------------------------------------
+# Safe function to assign color preventing 'subscript out of bounds'
 assign_color <- function(grp_name, cfg) {
-  # 1. Check specific definition in config
-  if (!is.null(cfg$colors$groups[[grp_name]])) return(cfg$colors$groups[[grp_name]])
-  # 2. Check control definition
-  if (grp_name == cfg$control_group) return(cfg$colors$control)
+  # 1. Check if defined in specific group colors (Checking names first prevents crash)
+  if (grp_name %in% names(cfg$colors$groups)) {
+    return(cfg$colors$groups[[grp_name]])
+  }
+  # 2. Check if it is ONE OF the control groups
+  if (grp_name %in% cfg$control_group) {
+    return(cfg$colors$control)
+  }
   # 3. Fallback
   return("grey50")
 }
 
-unique_groups <- levels(meta_viz$Group)
+unique_groups <- unique(as.character(meta_viz$Group))
 colors_viz <- setNames(sapply(unique_groups, function(g) assign_color(g, config)), unique_groups)
 
-# Highlight Pattern (Optional)
 hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
 
 out_dir <- file.path(config$output_root, "02_visualization")
@@ -97,7 +96,6 @@ viz_save_distribution_report(
 message("[PCA] Running PCA...")
 res_pca <- PCA(mat_z_global, scale.unit = FALSE, graph = FALSE)
 
-# Setup Highlight Map for PCA borders
 highlight_map <- c()
 if (hl_pattern != "") highlight_map[[hl_pattern]] <- config$colors$highlight
 
@@ -112,19 +110,21 @@ dev.off()
 # ------------------------------------------------------------------------------
 message("[Viz] Generating Heatmap...")
 
-# Select metadata for annotation
 target_cols <- config$viz$heatmap_metadata
 if (is.null(target_cols)) target_cols <- c("Group")
-
 valid_cols <- intersect(target_cols, names(meta_viz))
 meta_heatmap <- meta_viz[, valid_cols, drop = FALSE]
 
-# Define Annotation Colors
 annotation_colors <- list(Group = colors_viz)
 
-# If 'Original_Source' is present and distinct from Group, map it using the same palette if applicable
 if ("Original_Source" %in% names(meta_heatmap) && !identical(meta_heatmap$Group, meta_heatmap$Original_Source)) {
-  annotation_colors[["Original_Source"]] <- colors_viz 
+  annotation_colors[["Original_Source"]] <- viz_generate_complex_heatmap_colors(
+    metadata = meta_heatmap,
+    group_col = "Group",
+    base_colors = colors_viz,
+    hl_pattern = hl_pattern,
+    hl_color = config$colors$highlight
+  )[["Original_Source"]]
 }
 
 pdf(file.path(out_dir, "Heatmap_Stratification.pdf"), width = 10, height = 8)

@@ -1,7 +1,7 @@
 # src/03_statistical_analysis.R
 # ==============================================================================
 # STEP 03: STATISTICAL ANALYSIS
-# Description: Hypothesis testing (PERMANOVA, PLS-DA) with Flexible Selection
+# Description: Hypothesis testing (PERMANOVA, sPLS-DA)
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -33,33 +33,31 @@ df_global <- DATA$hybrid_data_z
 safe_markers <- DATA$hybrid_markers
 raw_matrix <- DATA$raw_matrix
 ilr_list <- DATA$ilr_balances
-
-# Metadata object aligned with df_global
 meta_viz <- DATA$metadata 
 
 # 2. Dynamic Selection Logic
 # ------------------------------------------------------------------------------
-# Instead of renaming groups with suffixes, we simply select the column defined
-# in the config (e.g., Original_Source) and use it as the main "Group".
 strat_col <- config$stratification$column
-
 message(sprintf("[Setup] Stratification Column: '%s'", strat_col))
 
 if (!strat_col %in% names(df_global)) {
   stop(sprintf("[Error] Column '%s' not found in processed data.", strat_col))
 }
 
-# Overwrite the generic 'Group' with the specific granularity requested
+# Overwrite 'Group' with the specific granularity requested
 df_global$Group <- df_global[[strat_col]]
 meta_viz$Group  <- meta_viz[[strat_col]]
 
 # 3. Filter Targets & Dynamic Color Mapping
 # ------------------------------------------------------------------------------
-target_control <- config$control_group
-target_cases <- config$case_groups
-target_all <- c(target_control, target_cases)
+# Ensure targets are vectors (handles single or multiple values)
+target_control <- as.vector(config$control_group)
+target_cases <- as.vector(config$case_groups)
+target_all <- unique(c(target_control, target_cases))
 
-message(sprintf("[Setup] Target Groups: %s vs %s", target_control, paste(target_cases, collapse=", ")))
+message(sprintf("[Setup] Target Groups: [%s] (Control) vs [%s] (Case)", 
+                paste(target_control, collapse=", "), 
+                paste(target_cases, collapse=", ")))
 
 # Check availability
 available_groups <- unique(df_global$Group)
@@ -73,26 +71,34 @@ if(length(missing) > 0) {
 df_global <- df_global %>% filter(Group %in% target_all)
 meta_viz <- meta_viz %>% filter(Patient_ID %in% df_global$Patient_ID)
 
-# Ensure Factor Order (Control first)
+# Ensure Factor Order (Control groups first)
 df_global$Group <- factor(df_global$Group, levels = target_all)
 meta_viz$Group <- factor(meta_viz$Group, levels = target_all)
 
-# --- DYNAMIC COLOR ASSIGNMENT ---
-# 1. Try to find specific colors defined in config$colors$groups
-# 2. Fallback to generic config$colors$cases if specific match fails
-
+# --- DYNAMIC COLOR ASSIGNMENT (Vector Safe) ---
 assign_color <- function(grp_name, cfg) {
-  if (!is.null(cfg$colors$groups[[grp_name]])) {
+  # 1. Check specific definition (Safely check names first)
+  if (grp_name %in% names(cfg$colors$groups)) {
     return(cfg$colors$groups[[grp_name]])
-  } else if (grp_name == cfg$control_group) {
+  }
+  # 2. Check if valid control (using %in% handles vectors correctly)
+  if (grp_name %in% cfg$control_group) {
     return(cfg$colors$control)
   }
-  return(NULL) # Signal to use generic fallback
+  # 3. Fallback
+  return(NULL)
 }
 
-cols_control <- setNames(assign_color(target_control, config), target_control)
+# Assign colors to Control groups
+cols_control <- setNames(
+  sapply(target_control, function(g) {
+    col <- assign_color(g, config)
+    if(is.null(col)) return("grey50") else return(col)
+  }), 
+  target_control
+)
 
-# Map case colors
+# Assign colors to Case groups
 cols_cases <- c()
 generic_palette <- config$colors$cases
 generic_idx <- 1
@@ -102,7 +108,6 @@ for (case in target_cases) {
   if (!is.null(specific_col)) {
     cols_cases[case] <- specific_col
   } else {
-    # Recycle generic palette
     cols_cases[case] <- generic_palette[(generic_idx - 1) %% length(generic_palette) + 1]
     generic_idx <- generic_idx + 1
   }
@@ -146,7 +151,6 @@ tryCatch({
 
 # 5. sPLS-DA (Multiclass / Stratified)
 # ------------------------------------------------------------------------------
-# This analysis tries to separate ALL groups defined in config
 if (config$multivariate$run_plsda) {
   message(sprintf("   [sPLS-DA] Fitting STRATIFIED model (Multiclass)..."))
   set.seed(config$stats$seed) 
@@ -181,24 +185,21 @@ if (config$multivariate$run_plsda) {
 
 # 6. sPLS-DA (Binary: Control vs Case)
 # ------------------------------------------------------------------------------
-# This analysis forces a binary comparison (All Cases vs Control)
 if (config$multivariate$run_plsda) {
-  message(sprintf("   [sPLS-DA] Fitting BINARY model (Control vs All Cases)..."))
+  message(sprintf("   [sPLS-DA] Fitting BINARY model (Pooled Control vs Pooled Cases)..."))
   set.seed(config$stats$seed) 
   
   tryCatch({
-    # Create Binary Labels based on the current selection
+    # Create Binary Labels
+    # Logic: If Group is ANY of the control groups -> Control, else Case
     meta_binary <- meta_viz %>% 
       mutate(Condition = ifelse(Group %in% config$control_group, "Control", "Case"))
     
-    # Define Binary Palette
-    # Use generic generic case color if specific isn't defined
     col_bin_case <- if(!is.null(config$colors$Case)) config$colors$Case else "firebrick"
     binary_palette <- c("Control" = config$colors$control, "Case" = col_bin_case)
     
     X_pls <- df_global[, safe_markers]
     
-    # Fit Binary Model
     pls_res_bin <- run_splsda_model(X_pls, meta_binary, group_col = "Condition", 
                                     n_comp = config$multivariate$n_comp,
                                     folds = config$multivariate$validation_folds)
@@ -206,7 +207,6 @@ if (config$multivariate$run_plsda) {
     top_drivers_bin <- extract_plsda_loadings(pls_res_bin)
     perf_metrics_bin <- extract_plsda_performance(pls_res_bin)
     
-    # Save Results
     addWorksheet(wb, "Binary_sPLSDA_Drivers")
     writeData(wb, "Binary_sPLSDA_Drivers", top_drivers_bin)
     addWorksheet(wb, "Binary_sPLSDA_Quality")
@@ -233,7 +233,6 @@ if (length(ilr_list) > 0) {
   for (grp_name in names(ilr_list)) {
     mat_ilr <- ilr_list[[grp_name]]
     
-    # Robust Matching
     common_ids <- intersect(df_global$Patient_ID, rownames(mat_ilr))
     
     if (length(common_ids) < 3) {
@@ -241,17 +240,12 @@ if (length(ilr_list) > 0) {
       next 
     }
     
-    # 1. Subset ILR matrix
     mat_ilr_sub <- mat_ilr[common_ids, , drop=FALSE]
-    
-    # 2. Extract corresponding groups from global df
     match_idx <- match(common_ids, df_global$Patient_ID)
     group_sub <- df_global$Group[match_idx]
     
-    # 3. Create local dataframe
     df_stats_local <- cbind(data.frame(Group = group_sub), as.data.frame(mat_ilr_sub))
     
-    # 4. Run PERMANOVA
     res_perm <- tryCatch({
       test_coda_permanova(df_stats_local, group_col = "Group", n_perm = config$stats$n_perm)
     }, error = function(e) {
@@ -260,7 +254,6 @@ if (length(ilr_list) > 0) {
     })
     
     if (!is.null(res_perm)) {
-      # Append to summary
       summary_local <- rbind(summary_local, data.frame(
         SubGroup = grp_name,
         P_Value = res_perm$`Pr(>F)`[1],

@@ -1,6 +1,7 @@
 # src/04_network_inference.R
 # ==============================================================================
-# STEP 04: NETWORK INFERENCE (BOOTSTRAP & PERMUTATION)
+# STEP 04: NETWORK INFERENCE 
+# Description: Bootstrap resampling & Permutation test
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -28,7 +29,6 @@ markers <- DATA$hybrid_markers
 
 # 2. Dynamic Selection
 # ------------------------------------------------------------------------------
-# Use the column defined in stratification.column as the main Grouping variable
 strat_col <- config$stratification$column
 message(sprintf("[Setup] Stratification Column: '%s'", strat_col))
 
@@ -39,20 +39,26 @@ if (!strat_col %in% names(df_input)) {
 # Update Group column
 df_input$Group <- df_input[[strat_col]]
 
-# 3. Target Selection
+# 3. Target Selection (Supports Multiple Controls)
 # ------------------------------------------------------------------------------
-grp_ctrl_name <- config$control_group
-grp_case_names <- config$case_groups
+grp_ctrl_names <- unique(c(config$control_group))
+grp_case_names <- unique(c(config$case_groups))
 
-message(sprintf("[Config] Network Contrast: %s (Control) vs %s (Case)", 
-                grp_ctrl_name, paste(grp_case_names, collapse="+")))
+message(sprintf("[Config] Network Contrast: [%s] vs [%s]", 
+                paste(grp_ctrl_names, collapse="+"), 
+                paste(grp_case_names, collapse="+")))
 
-# Validation
-if (!grp_ctrl_name %in% df_input$Group) stop(paste("Reference group not found in data:", grp_ctrl_name))
-missing_cases <- setdiff(grp_case_names, df_input$Group)
-if (length(missing_cases) > 0) stop(paste("Test groups not found in data:", paste(missing_cases, collapse=", ")))
+# Validation: Check if ALL requested control/case groups exist in data
+if (!all(grp_ctrl_names %in% df_input$Group)) {
+  missing <- setdiff(grp_ctrl_names, df_input$Group)
+  stop(paste("Reference group(s) not found in data:", paste(missing, collapse=", ")))
+}
+if (!all(grp_case_names %in% df_input$Group)) {
+  missing <- setdiff(grp_case_names, df_input$Group)
+  stop(paste("Test groups not found in data:", paste(missing, collapse=", ")))
+}
 
-# 4. Matrix Preparation
+# 4. Matrix Preparation (Pooling)
 # ------------------------------------------------------------------------------
 get_group_matrix <- function(df, group_names, features) {
   df %>% 
@@ -61,7 +67,9 @@ get_group_matrix <- function(df, group_names, features) {
     as.matrix()
 }
 
-mat_ctrl <- get_group_matrix(df_input, grp_ctrl_name, markers)
+# Pools all samples belonging to any of the control groups
+mat_ctrl <- get_group_matrix(df_input, grp_ctrl_names, markers)
+# Pools all samples belonging to any of the case groups
 mat_case <- get_group_matrix(df_input, grp_case_names, markers)
 
 message(sprintf("[Data] Control Matrix: %d samples | Case Matrix: %d samples", nrow(mat_ctrl), nrow(mat_case)))
@@ -69,7 +77,6 @@ if (nrow(mat_ctrl) < 5 || nrow(mat_case) < 5) stop("Insufficient sample size (<5
 
 # 5. Global Lambda (For Bootstrap Stability)
 # ------------------------------------------------------------------------------
-# We keep fixed lambda for Bootstrap to ensure we test stability of specific model
 lambda_ctrl <- corpcor::estimate.lambda(mat_ctrl, verbose = FALSE)
 lambda_case <- corpcor::estimate.lambda(mat_case, verbose = FALSE)
 message(sprintf("[Config] Lambda (Stability): Control=%.4f | Case=%.4f", lambda_ctrl, lambda_case))
@@ -105,7 +112,6 @@ n_perm <- config$stats$n_perm
 pool_mat <- rbind(mat_ctrl, mat_case)
 n1 <- nrow(mat_ctrl); n2 <- nrow(mat_case)
 
-# Dynamic Lambda (NULL) for Observed Difference
 obs_pcor_ctrl <- infer_network_pcor(mat_ctrl, fixed_lambda = NULL)
 obs_pcor_case <- infer_network_pcor(mat_case, fixed_lambda = NULL)
 obs_diff_mat  <- abs(obs_pcor_ctrl - obs_pcor_case)
@@ -117,7 +123,6 @@ null_diffs <- foreach(i = 1:n_perm, .packages = "corpcor") %dopar% {
   p1 <- pool_mat[shuffled[1:n1], ]
   p2 <- pool_mat[shuffled[(n1 + 1):(n1 + n2)], ]
   
-  # Dynamic lambda for null distribution
   r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
   r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
   abs(r1 - r2) 
@@ -137,9 +142,7 @@ if(nrow(edges_idx) > 0) {
     i <- edges_idx[k,1]; j <- edges_idx[k,2]
     obs_val <- obs_diff_mat[i,j]
     
-    # Extract value from each matrix in the list
     null_vals <- sapply(null_diffs, function(m) m[i, j])
-    
     p_val <- (sum(null_vals >= obs_val) + 1) / denom
     
     results_table <- rbind(results_table, data.frame(

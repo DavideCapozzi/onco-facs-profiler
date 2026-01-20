@@ -7,11 +7,11 @@ output_root: "results"
 project_name: "longsurvivors"
 input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
 
-# --- ANALYSIS TARGETS (Single Source of Truth) ---
+# --- ANALYSIS TARGETS ---
 # Define here exactly which groups form the analysis.
 # Names must match the values in the 'stratification.column' (e.g., Original_Source).
-control_group: "Healthy_Donors"
-case_groups: ["NSCLC", "HNSCC"]  # Example: Selecting only LS groups
+control_group: ["NSCLC", "HNSCC"]
+case_groups: ["NSCLC_LS", "HNSCC_LS"] 
 
 # --- STRATIFICATION LOGIC ---
 # "selection" mode simply promotes the target column to be the main grouping variable.
@@ -39,9 +39,8 @@ metadata:
 
 # --- VISUALS & COLORS ---
 colors:
-  control: "#2E8B57"         # Healthy Green
-  
   # Palette for generic case mapping if specific names are not found below
+  control: "#2E8B57"        
   cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] 
 
   # Specific color mapping for precise group names found in Original_Source
@@ -49,15 +48,9 @@ colors:
     # Macro groups
     NSCLC: "#CD5C5C"         
     HNSCC: "#4682B4"         
-    
-    # Specific groups 
-    NSCLC_LS: "#B22222"      # Dark Red
-    NSCLC_Std: "#FA8072"     # Salmon
-    HNSCC_LS: "#000080"      # Navy
-    HNSCC_Std: "#87CEFA"     # Light Blue
     Healthy: "#2E8B57" 
 
-  highlight: "#FFD700"       # Gold
+  highlight: "#FFD700"  
 
   heatmap:
     low: "#2166AC"    
