@@ -11,7 +11,7 @@ input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long s
 # Define here exactly which groups form the analysis.
 # Names must match the values in the 'stratification.column' (e.g., Original_Source).
 control_group: "Healthy_Donors"
-case_groups: ["NSCLC_LS", "NSCLC", "HNSCC", "HNSCC_LS"]  # Example: Selecting only LS groups
+case_groups: ["NSCLC", "HNSCC"]  # Example: Selecting only LS groups
 
 # --- STRATIFICATION LOGIC ---
 # "selection" mode simply promotes the target column to be the main grouping variable.

@@ -1,6 +1,7 @@
 # src/01_data_processing.R
 # ==============================================================================
-# STEP 01: DATA INGESTION + QC + HYBRID CODA PREPROCESSING
+# STEP 01: DATA PROCESSING
+# Description: Data ingestion + QC + hybrid coda preprocessing
 # ==============================================================================
 
 suppressPackageStartupMessages({
