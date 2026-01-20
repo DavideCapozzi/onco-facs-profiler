@@ -31,7 +31,7 @@ safe_markers <- DATA$hybrid_markers
 raw_matrix   <- DATA$raw_matrix
 mat_z_global <- as.matrix(DATA$hybrid_data_z[, safe_markers]) 
 
-# 3. Colors Setup (Robust)
+# 3. Colors Setup 
 # ------------------------------------------------------------------------------
 # Function to safely find a color for a group name
 get_color_safe <- function(grp_name, cfg) {
@@ -47,7 +47,7 @@ get_color_safe <- function(grp_name, cfg) {
 unique_groups <- unique(meta_viz$Group)
 colors_viz <- setNames(sapply(unique_groups, function(g) get_color_safe(g, config)), unique_groups)
 
-# 3b. [NEW] Palette for Original_Source (Subgroups like NSCLC_LS)
+# 3b. Palette for Original_Source (Subgroups like NSCLC_LS)
 # We map these sub-labels to the colors defined in config$colors$groups
 if ("Original_Source" %in% colnames(meta_viz)) {
   unique_sources <- unique(meta_viz$Original_Source)
@@ -115,7 +115,7 @@ if (is.null(target_cols)) target_cols <- c("Group")
 valid_cols <- intersect(target_cols, names(meta_viz))
 meta_heatmap <- meta_viz[, valid_cols, drop = FALSE]
 
-# [FIX] Add colors_source to the annotation list
+# Add colors_source to the annotation list
 annotation_colors <- list(Group = colors_viz)
 if (!is.null(colors_source) && "Original_Source" %in% names(meta_heatmap)) {
   annotation_colors[["Original_Source"]] = colors_source

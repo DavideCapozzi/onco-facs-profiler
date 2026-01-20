@@ -51,7 +51,7 @@ if (!is.null(config$marker_selection$blacklist) && length(config$marker_selectio
 
 mat_raw <- mat_raw[, target_markers, drop = FALSE]
 
-# 2.1 [NEW] Data Assumption Validation
+# 2.1 Data Assumption Validation
 # ------------------------------------------------------------------------------
 # We strictly assume input data are PERCENTAGES (0-100) based on modules_coda.R update.
 # This check ensures we don't accidentally process Proportions (0-1) which would

@@ -26,26 +26,18 @@ DATA <- readRDS(input_file)
 df_input <- DATA$hybrid_data_z 
 markers <- DATA$hybrid_markers
 
-# 2. Dynamic Stratification
+# 2. Dynamic Selection
 # ------------------------------------------------------------------------------
-strat_mode <- config$stratification$mode
-message(sprintf("[Setup] Stratification Mode: '%s'", strat_mode))
+# Use the column defined in stratification.column as the main Grouping variable
+strat_col <- config$stratification$column
+message(sprintf("[Setup] Stratification Column: '%s'", strat_col))
 
-if (strat_mode == "stratified_ls") {
-  strat_conf <- config$stratification
-  df_input <- df_input %>%
-    mutate(Group = case_when(
-      Group %in% config$control_group ~ Group, 
-      grepl(strat_conf$pattern, .data[[strat_conf$column]]) ~ paste0(Group, strat_conf$suffix_match),
-      TRUE ~ paste0(Group, strat_conf$suffix_no_match)
-    ))
-} else if (strat_mode == "binary") {
-  df_input <- df_input %>%
-    mutate(Group = case_when(
-      Group %in% config$control_group ~ "Control",
-      TRUE ~ "Case"
-    ))
+if (!strat_col %in% names(df_input)) {
+  stop(sprintf("[Error] Column '%s' not found in processed data.", strat_col))
 }
+
+# Update Group column
+df_input$Group <- df_input[[strat_col]]
 
 # 3. Target Selection
 # ------------------------------------------------------------------------------
@@ -56,9 +48,9 @@ message(sprintf("[Config] Network Contrast: %s (Control) vs %s (Case)",
                 grp_ctrl_name, paste(grp_case_names, collapse="+")))
 
 # Validation
-if (!grp_ctrl_name %in% df_input$Group) stop(paste("Reference group not found:", grp_ctrl_name))
+if (!grp_ctrl_name %in% df_input$Group) stop(paste("Reference group not found in data:", grp_ctrl_name))
 missing_cases <- setdiff(grp_case_names, df_input$Group)
-if (length(missing_cases) > 0) stop(paste("Test groups not found:", paste(missing_cases, collapse=", ")))
+if (length(missing_cases) > 0) stop(paste("Test groups not found in data:", paste(missing_cases, collapse=", ")))
 
 # 4. Matrix Preparation
 # ------------------------------------------------------------------------------
@@ -113,21 +105,19 @@ n_perm <- config$stats$n_perm
 pool_mat <- rbind(mat_ctrl, mat_case)
 n1 <- nrow(mat_ctrl); n2 <- nrow(mat_case)
 
-# [FIX] Use Dynamic Lambda (NULL) for Observed Difference to match Permutations logic
-# This reproduces the "Old" behavior where lambda was re-estimated
+# Dynamic Lambda (NULL) for Observed Difference
 obs_pcor_ctrl <- infer_network_pcor(mat_ctrl, fixed_lambda = NULL)
 obs_pcor_case <- infer_network_pcor(mat_case, fixed_lambda = NULL)
 obs_diff_mat  <- abs(obs_pcor_ctrl - obs_pcor_case)
 
 clusterSetRNGStream(cl, config$stats$seed + 2000)
 
-# Return a LIST of matrices, not a flattened vector
 null_diffs <- foreach(i = 1:n_perm, .packages = "corpcor") %dopar% {
   shuffled <- sample(1:(n1 + n2))
   p1 <- pool_mat[shuffled[1:n1], ]
   p2 <- pool_mat[shuffled[(n1 + 1):(n1 + n2)], ]
   
-  # Dynamic lambda for null distribution (Standard)
+  # Dynamic lambda for null distribution
   r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
   r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
   abs(r1 - r2) 
@@ -143,7 +133,6 @@ results_table <- data.frame()
 if(nrow(edges_idx) > 0) {
   denom <- n_perm + 1
   
-  # [FIX] Handle list structure of null_diffs correctly
   for(k in 1:nrow(edges_idx)) {
     i <- edges_idx[k,1]; j <- edges_idx[k,2]
     obs_val <- obs_diff_mat[i,j]

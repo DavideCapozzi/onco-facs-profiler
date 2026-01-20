@@ -8,19 +8,16 @@ project_name: "longsurvivors"
 input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
 
 # --- ANALYSIS TARGETS (Single Source of Truth) ---
-# Define here exactly which groups you want to analyze and color.
-# If using stratification (see below), use the suffixed names (e.g., "NSCLC_LS").
-control_group: "Healthy"
-case_groups: ["NSCLC_LS", "NSCLC_Std", "HNSCC_LS", "HNSCC_Std"]  # Dynamic: Add/Remove groups here. 
+# Define here exactly which groups form the analysis.
+# Names must match the values in the 'stratification.column' (e.g., Original_Source).
+control_group: "Healthy_Donors"
+case_groups: ["NSCLC_LS", "NSCLC", "HNSCC", "HNSCC_LS"]  # Example: Selecting only LS groups
 
 # --- STRATIFICATION LOGIC ---
-# How to build the group labels from metadata?
+# "selection" mode simply promotes the target column to be the main grouping variable.
 stratification:
-  mode: "stratified_ls"         # Options: "original" (no change), "stratified_ls" (split by pattern), "binary" (Control vs Case)
-  column: "Original_Source"     # Metadata column to check
-  pattern: "_LS"                # Pattern to identify the subgroup
-  suffix_match: "_LS"           # Suffix for matching samples
-  suffix_no_match: "_Std"       # Suffix for non-matching samples
+  mode: "selection"             # Mode: direct selection from metadata
+  column: "Original_Source"     # Metadata column containing the precise group names
 
 # --- COHORTS MAPPING ---
 cohorts:
@@ -41,35 +38,26 @@ metadata:
   subgroup_col: "Original_Source"
 
 # --- VISUALS & COLORS ---
-# Qui definisci i colori per TUTTI i possibili nomi (Sia Macro che Micro).
-# Così Step 2 trova "NSCLC" e Step 3 trova "NSCLC_LS".
 colors:
-  control: "#2E8B57"         # Healthy
-  Case: "#B22222"
-
-  # Definiamo colori espliciti per evitare confusioni
-  groups:
-    # Gruppi MACRO (Per Step 2 - Distribuzioni Unite)
-    NSCLC: "#CD5C5C"         # Rosso Indiano
-    HNSCC: "#4682B4"         # Blu Acciaio
-    
-    # Gruppi MICRO (Per Step 3/4 - Se vuoi colori specifici, altrimenti eredita)
-    NSCLC_LS: "#B22222"      # Rosso Scuro (Firebrick)
-    NSCLC_Std: "#FA8072"     # Rosso Chiaro (Salmon)
-    HNSCC_LS: "#000080"      # Blu Scuro (Navy)
-    HNSCC_Std: "#87CEFA"     # Blu Chiaro (LightSkyBlue)
-
-  # Palette di riserva (lasciala per sicurezza)
-  cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] 
+  control: "#2E8B57"         # Healthy Green
   
-  highlight: "#FFD700"       # Oro (Per i punti LS nello Step 2)
+  # Palette for generic case mapping if specific names are not found below
+  cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"] 
 
-# # Colors are applied dynamically to the groups defined in 'case_groups' above.
-# colors:
-#   control: "#2E8B57"         # SeaGreen (Always assigned to control_group)
-#   # The palette below is assigned in order to the groups in 'case_groups'
-#   cases: ["#CD5C5C", "#4682B4", "#9932CC", "#FF8C00"]  
-#  highlight: "#FFD700"       # Gold (for specific highlighting if needed)
+  # Specific color mapping for precise group names found in Original_Source
+  groups:
+    # Macro groups
+    NSCLC: "#CD5C5C"         
+    HNSCC: "#4682B4"         
+    
+    # Specific groups 
+    NSCLC_LS: "#B22222"      # Dark Red
+    NSCLC_Std: "#FA8072"     # Salmon
+    HNSCC_LS: "#000080"      # Navy
+    HNSCC_Std: "#87CEFA"     # Light Blue
+    Healthy: "#2E8B57" 
+
+  highlight: "#FFD700"       # Gold
 
   heatmap:
     low: "#2166AC"    
@@ -116,3 +104,4 @@ stats:
   alpha: 0.05         
   fdr_threshold: 0.1 
   n_cores: "auto"
+
