@@ -100,10 +100,12 @@ run_parallel_bootstrap <- function(data_mat, n_boot, seed_val, fixed_lambda) {
 message("[Inference] Bootstrapping Control...")
 boot_ctrl <- run_parallel_bootstrap(mat_ctrl, config$stats$n_boot, config$stats$seed, lambda_ctrl)
 res_ctrl <- aggregate_boot_results(boot_ctrl, alpha = config$stats$alpha)
+check_boot_yield(res_ctrl, config$stats$n_boot, "Control")
 
 message("[Inference] Bootstrapping Case...")
 boot_case <- run_parallel_bootstrap(mat_case, config$stats$n_boot, config$stats$seed + 1000, lambda_case)
 res_case <- aggregate_boot_results(boot_case, alpha = config$stats$alpha)
+check_boot_yield(res_case, config$stats$n_boot, "Case")
 
 # 7. Permutation Test (Differential)
 # ------------------------------------------------------------------------------

@@ -55,6 +55,24 @@ boot_worker_pcor <- function(mat, n, lambda_val = NULL) {
   }, error = function(e) return(NULL))
 }
 
+#' @title Check Bootstrap Yield
+#' @description Warnings if too many bootstrap iterations were discarded due to zero variance.
+#' @param res_obj The result list from aggregate_boot_results.
+#' @param n_req The original number of requested bootstraps.
+#' @param label String label for the group (e.g., "Control").
+check_boot_yield <- function(res_obj, n_req, label) {
+  if (is.null(res_obj) || is.null(res_obj$n_boot_valid)) return()
+  
+  if (res_obj$n_boot_valid < (n_req * 0.8)) {
+    warning(sprintf(
+      "[WARN] Low bootstrap yield for %s: %d/%d valid iterations. Results may be unstable.", 
+      label, res_obj$n_boot_valid, n_req
+    ))
+  } else {
+    message(sprintf("   -> %s Bootstrap Yield: %d/%d (OK)", label, res_obj$n_boot_valid, n_req))
+  }
+}
+
 #' @title Aggregate Bootstrap Results
 #' @description Calculates edge stability and mean weights based on CI.
 aggregate_boot_results <- function(boot_list, alpha = 0.05) {
