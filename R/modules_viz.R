@@ -178,6 +178,8 @@ viz_save_distribution_report <- function(data_df, markers, file_path, colors, hl
   message(sprintf("   [Viz] Saving distribution report to: %s", basename(file_path)))
   
   pdf(file_path, width = 8, height = 6)
+  # Ensure device is closed even if the loop crashes
+  on.exit(try(dev.off(), silent = TRUE), add = TRUE)
   
   for (marker in markers) {
     if (marker %in% names(data_df)) {

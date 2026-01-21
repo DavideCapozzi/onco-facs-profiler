@@ -53,7 +53,7 @@ if (nrow(meta_viz) < 3) stop("Insufficient samples after filtering (<3). Check c
 message(sprintf("[Viz] Analyzed Set: %d Samples across %d Macro-Groups", 
                 nrow(meta_viz), length(unique(meta_viz$Group))))
 
-# 3. Colors Setup (Robust Fix)
+# 3. Colors Setup 
 # ------------------------------------------------------------------------------
 # Safe function to assign color preventing 'subscript out of bounds'
 assign_color <- function(grp_name, cfg) {

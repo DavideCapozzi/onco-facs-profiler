@@ -47,7 +47,13 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
   # Define grid of keepX to test: from 5 markers up to all markers
   n_vars <- ncol(X)
   list_keepX <- c(seq(5, min(30, n_vars), by = 5))
-  if (n_vars > 30) list_keepX <- c(list_keepX, n_vars)
+  # Logic adapted for small datasets (<5 features)
+  if (n_vars < 5) {
+    list_keepX <- c(n_vars)
+  } else {
+    list_keepX <- c(seq(5, min(30, n_vars), by = 5))
+    if (n_vars > 30) list_keepX <- c(list_keepX, n_vars)
+  }
   list_keepX <- unique(list_keepX)
   
   # Run Tuning (tune.splsda)

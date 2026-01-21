@@ -43,6 +43,13 @@ boot_worker_pcor <- function(mat, n, lambda_val = NULL) {
   idx <- sample(1:n, n, replace = TRUE)
   boot_sample <- mat[idx, ]
   
+  # Safety Check: Zero variance (constant columns) causes correlation failure
+  # If any column is constant in this resample, discard the iteration.
+  col_vars <- apply(boot_sample, 2, var, na.rm = TRUE)
+  if (any(col_vars == 0 | is.na(col_vars))) {
+    return(NULL)
+  }
+  
   tryCatch({
     return(infer_network_pcor(boot_sample, fixed_lambda = lambda_val))
   }, error = function(e) return(NULL))
