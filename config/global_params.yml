@@ -10,9 +10,8 @@ input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long s
 # --- ANALYSIS TARGETS ---
 # Define here exactly which groups form the analysis.
 # Names must match the values in the 'stratification.column' (e.g., Original_Source).
-control_group: ["NSCLC", "HNSCC"]
-case_groups: ["NSCLC_LS", "HNSCC_LS"] 
-
+control_group: "Healthy_Donors"
+case_groups: ["HNSCC", "NSCLC", "NSCLC_LS", "HNSCC_LS"] 
 # --- STRATIFICATION LOGIC ---
 # "selection" mode simply promotes the target column to be the main grouping variable.
 stratification:

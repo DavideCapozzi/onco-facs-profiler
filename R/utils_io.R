@@ -92,7 +92,7 @@ save_qc_report <- function(qc_list, out_path) {
   # Create a clean summary dataframe
   summary_df <- data.frame(
     Metric = c("Initial Samples", "Initial Markers",
-               "Dropped Samples (High NA)", "Dropped Markers (High NA)", "Dropped Markers (Zero Var)",
+               "Dropped Samples (High NA + Outliers)", "Dropped Markers (High NA)", "Dropped Markers (Zero Var)",
                "Final Samples", "Final Markers"),
     Count = c(qc_list$n_row_init, qc_list$n_col_init,
               qc_list$n_row_dropped, qc_list$n_col_dropped, qc_list$n_col_zerovar,

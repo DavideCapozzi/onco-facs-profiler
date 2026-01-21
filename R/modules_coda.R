@@ -123,7 +123,16 @@ coda_transform_clr <- function(mat) {
   
   message("   [CoDa] Applying CLR transformation...")
   
-  clr_mat <- t(apply(mat, 1, function(x) log(x / calc_gmean_safe(x))))
+  # Optimization: Use vectorized math to prevent 'apply' dimension dropping on 1-col matrices
+  # Algebra: log(x / gmean(x)) == log(x) - mean(log(x))
+  log_mat <- log(mat)
+  
+  # Calculate row means (equivalent to log of geometric means), ignoring NAs
+  row_means <- rowMeans(log_mat, na.rm = TRUE)
+  
+  # R handles row-wise subtraction via recycling
+  clr_mat <- log_mat - row_means
+  
   return(clr_mat)
 }
 

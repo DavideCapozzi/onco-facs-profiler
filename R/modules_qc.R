@@ -53,8 +53,12 @@ detect_pca_outliers <- function(mat, groups, conf_level = 0.99) {
       
       # Use top PCs explaining ~90% variance or max 5 PCs to avoid noise
       # If N is small, use fewer PCs (N-2)
+      max_available_pcs <- ncol(pca_res$x)
       n_pc <- min(ncol(sub_mat), length(idx) - 2, 5) 
-      if (n_pc < 2) n_pc <- 2
+      
+      # Safety check: ensure n_pc does not exceed available PCs or drop below 1
+      if (n_pc > max_available_pcs) n_pc <- max_available_pcs
+      if (n_pc < 1) n_pc <- 1
       
       scores <- pca_res$x[, 1:n_pc, drop = FALSE]
       
