@@ -330,6 +330,10 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
   comp_markers_list <- unique(unlist(config$hybrid_groups))
   comp_markers <- intersect(all_current_markers, comp_markers_list)
   func_markers <- setdiff(all_current_markers, comp_markers)
+  if (length(func_markers) > 0) {
+    message(paste("[CoDa] The following markers will be considered as Functional (Logit):", 
+                  paste(func_markers, collapse=", ")))
+  }
   
   mat_comp_trans <- NULL
   mat_func_trans <- NULL
