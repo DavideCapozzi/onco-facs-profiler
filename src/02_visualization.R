@@ -55,22 +55,22 @@ message(sprintf("[Viz] Analyzed Set: %d Samples across %d Macro-Groups",
 
 # 3. Colors Setup 
 # ------------------------------------------------------------------------------
-# Safe function to assign color preventing 'subscript out of bounds'
-assign_color <- function(grp_name, cfg) {
-  # 1. Check if defined in specific group colors (Checking names first prevents crash)
-  if (grp_name %in% names(cfg$colors$groups)) {
-    return(cfg$colors$groups[[grp_name]])
-  }
-  # 2. Check if it is ONE OF the control groups
-  if (grp_name %in% cfg$control_group) {
-    return(cfg$colors$control)
-  }
-  # 3. Fallback
-  return("grey50")
+full_palette <- get_palette(config)
+unique_groups <- unique(as.character(meta_viz$Group))
+
+# Subset palette for groups present in current data
+colors_viz <- full_palette[unique_groups]
+names(colors_viz) <- unique_groups 
+
+# Fallback: Handle groups present in data but undefined in config
+if (any(is.na(colors_viz))) {
+  missing_grps <- unique_groups[is.na(colors_viz)]
+  warning(sprintf("[Viz] Groups found in data but missing in config/palette: %s", 
+                  paste(missing_grps, collapse=", ")))
+  colors_viz[missing_grps] <- "grey50"
 }
 
-unique_groups <- unique(as.character(meta_viz$Group))
-colors_viz <- setNames(sapply(unique_groups, function(g) assign_color(g, config)), unique_groups)
+hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
 
 hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
 

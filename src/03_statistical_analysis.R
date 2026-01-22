@@ -75,45 +75,20 @@ meta_viz <- meta_viz %>% filter(Patient_ID %in% df_global$Patient_ID)
 df_global$Group <- factor(df_global$Group, levels = target_all)
 meta_viz$Group <- factor(meta_viz$Group, levels = target_all)
 
-# --- DYNAMIC COLOR ASSIGNMENT (Vector Safe) ---
-assign_color <- function(grp_name, cfg) {
-  # 1. Check specific definition (Safely check names first)
-  if (grp_name %in% names(cfg$colors$groups)) {
-    return(cfg$colors$groups[[grp_name]])
-  }
-  # 2. Check if valid control (using %in% handles vectors correctly)
-  if (grp_name %in% cfg$control_group) {
-    return(cfg$colors$control)
-  }
-  # 3. Fallback
-  return(NULL)
+# --- DYNAMIC COLOR ASSIGNMENT ---
+# Use centralized palette logic from modules_viz.R
+# This ensures visual consistency between Step 02 and Step 03
+full_palette <- get_palette(config)
+
+# Filter for the specific targets of this analysis
+current_palette <- full_palette[target_all]
+
+# Validation: Ensure all targets have an assigned color
+if (any(is.na(current_palette))) {
+  na_grps <- target_all[is.na(current_palette)]
+  warning(paste("[Stats] Colors missing for groups:", paste(na_grps, collapse=", ")))
+  current_palette[is.na(current_palette)] <- "grey50"
 }
-
-# Assign colors to Control groups
-cols_control <- setNames(
-  sapply(target_control, function(g) {
-    col <- assign_color(g, config)
-    if(is.null(col)) return("grey50") else return(col)
-  }), 
-  target_control
-)
-
-# Assign colors to Case groups
-cols_cases <- c()
-generic_palette <- config$colors$cases
-generic_idx <- 1
-
-for (case in target_cases) {
-  specific_col <- assign_color(case, config)
-  if (!is.null(specific_col)) {
-    cols_cases[case] <- specific_col
-  } else {
-    cols_cases[case] <- generic_palette[(generic_idx - 1) %% length(generic_palette) + 1]
-    generic_idx <- generic_idx + 1
-  }
-}
-
-current_palette <- c(cols_control, cols_cases)
 
 # Initialize Excel Workbook
 out_dir <- file.path(config$output_root, "03_statistics")

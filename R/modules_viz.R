@@ -31,45 +31,54 @@ theme_coda <- function() {
 }
 
 #' @title Generate Dynamic Group Palette
-#' @description Maps generic config colors to specific project groups defined in control/case_groups.
+#' @description 
+#' Centralized color logic. Priority:
+#' 1. Specific Override (config$colors$groups)
+#' 2. Control Groups (Fixed Color)
+#' 3. Case Groups (Recycled Palette, no gradients)
 #' @param config The loaded configuration list.
 #' @return A named vector of hex codes.
 get_palette <- function(config) {
   
-  # 1. Defaults if config is incomplete
-  if (is.null(config$colors) || is.null(config$control_group)) {
-    return(c(Control = "grey", Case = "red"))
-  }
-  
-  # [FIX] Initialize as character vector to prevent list creation on assignment
   final_palette <- character()
   
-  # 2. Assign Control Color
-  ctrl_name <- config$control_group
-  ctrl_color <- if(!is.null(config$colors$control)) config$colors$control else "#2E8B57"
-  final_palette[[ctrl_name]] <- ctrl_color
+  # 1. Defaults setup
+  ctrl_col <- if(!is.null(config$colors$control)) config$colors$control else "grey50"
+  case_cols <- if(!is.null(config$colors$cases)) config$colors$cases else c("#CD5C5C", "#4682B4")
   
-  # 3. Assign Case Colors
-  case_names <- config$case_groups
-  case_colors <- if(!is.null(config$colors$cases)) config$colors$cases else c("#CD5C5C", "#4682B4")
-  
-  if (length(case_names) > 0) {
-    # Interpolate if we have more groups than defined colors
-    if (length(case_colors) < length(case_names)) {
-      pal_func <- colorRampPalette(case_colors)
-      case_colors <- pal_func(length(case_names))
-    }
-    
-    # Map colors to Case Group Names
-    for (i in seq_along(case_names)) {
-      grp_name <- case_names[i]
-      final_palette[[grp_name]] <- case_colors[i]
+  # 2. Assign Control Colors
+  # Iterates over all defined control groups to ensure coverage
+  if (!is.null(config$control_group)) {
+    for(g in config$control_group) {
+      final_palette[[g]] <- ctrl_col
     }
   }
   
-  # 4. Ensure generic "Case" key exists (for merged plots)
+  # 3. Assign Case Colors (with Recycling Logic)
+  if (!is.null(config$case_groups)) {
+    case_grps <- config$case_groups
+    
+    for (i in seq_along(case_grps)) {
+      grp <- case_grps[i]
+      
+      # Priority A: Check specific override in config
+      if (!is.null(config$colors$groups) && !is.null(config$colors$groups[[grp]])) {
+        final_palette[[grp]] <- config$colors$groups[[grp]]
+      } else {
+        # Priority B: Recycle case palette (Modulo operator)
+        # Guarantees distinct colors matching the statistical report style
+        col_idx <- (i - 1) %% length(case_cols) + 1
+        final_palette[[grp]] <- case_cols[col_idx]
+      }
+    }
+  }
+  
+  # 4. Generic Fallback keys (useful for binary plots/summaries)
   if (!("Case" %in% names(final_palette))) {
     final_palette[["Case"]] <- if(!is.null(config$colors$Case)) config$colors$Case else "#CD5C5C"
+  }
+  if (!("Control" %in% names(final_palette))) {
+    final_palette[["Control"]] <- ctrl_col
   }
   
   return(final_palette)

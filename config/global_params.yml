@@ -22,7 +22,7 @@ stratification:
 cohorts:
   NSCLC: "NSCLC"
   HNSCC: "HNSCC"
-  Healthy: "Healthy_Donors"
+  Healthy_Donors: "Healthy_Donors"
 
 marker_selection:
   whitelist: []      
@@ -47,7 +47,7 @@ colors:
     # Macro groups
     NSCLC: "#CD5C5C"         
     HNSCC: "#4682B4"         
-    Healthy: "#2E8B57" 
+    Healthy_Donors: "#2E8B57" 
 
   highlight: "#FFD700"  
 
