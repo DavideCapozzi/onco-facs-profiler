@@ -80,12 +80,14 @@ qc:
 # --- Imputation (CoDa) ---
 imputation:
   method: "czm_multrepl"      
+  epsilon: 0.000001
 
 # --- Multivariate & Interpretation ---
 multivariate:
   run_plsda: true
   n_comp: 2           
   validation_folds: 5 
+  n_repeat_cv: 50
   top_n_loadings: 15  
 
 # --- Inference Statistics ---

@@ -31,18 +31,30 @@ detect_pca_outliers <- function(mat, groups, conf_level = 0.99) {
     
     sub_mat <- mat[idx, , drop = FALSE]
     
-    # Handle NAs temporarily for PCA (Median Imputation)
-    # This is strictly for outlier detection, not final analysis
+    # 1. Handle NAs: First remove columns that are 100% NA in this subgroup
+    # (Median imputation would fail for these, returning NA)
+    na_counts <- colSums(is.na(sub_mat))
+    valid_cols <- na_counts < nrow(sub_mat)
+    sub_mat <- sub_mat[, valid_cols, drop = FALSE]
+    
+    if (ncol(sub_mat) < 2) next
+    
+    # 2. Impute remaining sporadic NAs (Median Imputation)
     if (any(is.na(sub_mat))) {
       sub_mat <- apply(sub_mat, 2, function(x) {
+        if (all(is.na(x))) return(x) # Should be handled by step 1, but safety first
         x[is.na(x)] <- median(x, na.rm = TRUE)
         return(x)
       })
     }
     
-    # Remove zero-variance columns locally
-    vars <- apply(sub_mat, 2, var)
-    sub_mat <- sub_mat[, vars > 0, drop = FALSE]
+    # 3. Remove zero-variance columns locally (Robust check)
+    # Use na.rm = TRUE to prevent NA propagation
+    vars <- apply(sub_mat, 2, var, na.rm = TRUE)
+    # Check for non-NA and strictly positive variance (use tolerance for float precision)
+    keep_vars <- !is.na(vars) & vars > 1e-12
+    
+    sub_mat <- sub_mat[, keep_vars, drop = FALSE]
     
     if (ncol(sub_mat) < 2) next 
     

@@ -20,9 +20,10 @@ library(mixOmics)
 #' @param n_comp Number of components to compute (default: 2).
 #' @param validation_method CV method ("Mfold" or "loo"). 
 #' @param folds Number of folds for Mfold CV (default: 5).
+#' @param n_repeat Number of repetitions for Cross-Validation (default: 50).
 #' @return A list containing the final optimized model, performance metrics, and tuning results.
 run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2, 
-                             validation_method = "Mfold", folds = 5) {
+                             validation_method = "Mfold", folds = 5, n_repeat = 50) {
   
   # Ensure mixOmics is loaded
   requireNamespace("mixOmics", quietly = TRUE)
@@ -66,7 +67,7 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
     folds = folds, 
     dist = "max.dist", 
     progressBar = FALSE,
-    nrepeat = 50
+    nrepeat = n_repeat  # Updated: Uses argument instead of hardcoded 50
   )
   
   choice_keepX <- tune_splsda$choice.keepX
@@ -81,7 +82,7 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
   # We wrap this in tryCatch as perf() can sometimes fail on edge cases
   perf_splsda <- tryCatch({
     mixOmics::perf(final_model, validation = validation_method, folds = folds, 
-                   progressBar = FALSE, nrepeat = 10, auc = TRUE)
+                   progressBar = FALSE, nrepeat = n_repeat, auc = TRUE) # Updated: Uses n_repeat
   }, error = function(e) {
     message(paste("      [WARN] Performance evaluation failed:", e$message))
     return(NULL) 

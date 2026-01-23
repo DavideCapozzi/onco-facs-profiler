@@ -321,6 +321,9 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
   
   if (!mode %in% c("complete", "fast")) stop("Mode must be 'complete' or 'fast'.")
   
+  # Retrieve epsilon from config with safe default
+  eps_val <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
+  
   message(sprintf("\n[CoDa] Starting Hybrid Strategy (%s mode)...", mode))
   
   rn_safe <- rownames(mat_raw)
@@ -359,7 +362,7 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
         }
       } else {
         mat_comp_clean <- mat_comp_raw
-        mat_comp_clean[mat_comp_clean <= 0 | is.na(mat_comp_clean)] <- 1e-6
+        mat_comp_clean[mat_comp_clean <= 0 | is.na(mat_comp_clean)] <- eps_val # Use config epsilon
       }
       rownames(mat_comp_clean) <- rn_safe 
       
@@ -388,17 +391,18 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
       if (mode == "complete") {
         mins <- apply(mat_func_lod, 2, function(x) {
           pos <- x[x > 0 & !is.na(x)]
-          if(length(pos) > 0) min(pos)/2 else 1e-6
+          if(length(pos) > 0) min(pos)/2 else eps_val # Use config epsilon
         })
         for (j in 1:ncol(mat_func_lod)) {
           zeros <- which(mat_func_lod[, j] == 0 & !is.na(mat_func_lod[, j]))
           if (length(zeros) > 0) mat_func_lod[zeros, j] <- mins[j]
         }
       } else {
-        mat_func_lod[mat_func_lod <= 0] <- 1e-6
+        mat_func_lod[mat_func_lod <= 0] <- eps_val # Use config epsilon
       }
       
-      mat_func_logit <- coda_transform_logit(mat_func_lod, input_type = "percentage")
+      # Pass epsilon to the transformation function
+      mat_func_logit <- coda_transform_logit(mat_func_lod, epsilon = eps_val, input_type = "percentage")
       
       if (mode == "complete") {
         if (any(colSums(!is.na(mat_func_logit)) == 0)) {
