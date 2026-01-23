@@ -134,9 +134,13 @@ if (config$multivariate$run_plsda) {
     X_pls <- df_global[, safe_markers]
     meta_stats <- meta_viz 
     
+    # Retrieve new config parameter with fallback
+    n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 50
+    
     pls_res <- run_splsda_model(X_pls, meta_stats, group_col = "Group", 
                                 n_comp = config$multivariate$n_comp,
-                                folds = config$multivariate$validation_folds)
+                                folds = config$multivariate$validation_folds,
+                                n_repeat = n_rep) # Explicitly passing the variable defined above
     
     top_drivers <- extract_plsda_loadings(pls_res)
     perf_metrics <- extract_plsda_performance(pls_res)
@@ -175,9 +179,13 @@ if (config$multivariate$run_plsda) {
     
     X_pls <- df_global[, safe_markers]
     
+    # Retrieve new config parameter with fallback
+    n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 50
+    
     pls_res_bin <- run_splsda_model(X_pls, meta_binary, group_col = "Condition", 
                                     n_comp = config$multivariate$n_comp,
-                                    folds = config$multivariate$validation_folds)
+                                    folds = config$multivariate$validation_folds,
+                                    n_repeat = n_rep) # Explicitly passing the variable defined above
     
     top_drivers_bin <- extract_plsda_loadings(pls_res_bin)
     perf_metrics_bin <- extract_plsda_performance(pls_res_bin)
