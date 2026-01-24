@@ -1,53 +1,105 @@
 # main.R
 # ==============================================================================
-# PROJECT: ROBUST COMPOSITIONAL DATA ANALYSIS PIPELINE (FACS/CYTOF)
-# AUTHOR: Davide Capozzi
-# DATE: 21/01/2026
+# MAIN PIPELINE ORCHESTRATOR
+# Description: Executes steps 01-05 sequentially with Real-Time TEE logging.
 # ==============================================================================
-setwd("/home/davidec/projects/compositional_analysis")
 
-# A. Global Environment Setup
-# Clean workspace to ensure reproducibility
+# Clean environment
 rm(list = ls())
 graphics.off()
 
-# Load Infrastructure Module (for logging and config)
-source("R/utils_io.R")
+# 1. Setup Logging & Clean Output
+# ------------------------------------------------------------------------------
+library(yaml)
 
-# Initialize Logger (Optional but recommended, otherwise use base message)
-# If 'logger' package is not installed, simple messages will work via the scripts
-message("[MAIN] Initializing Project Environment...")
+# DISABLE ANSI COLORS (Fixes the "strange symbols" in log file)
+options(crayon.enabled = FALSE)
 
-# B. Configuration Check
-# Defines the single source of truth for the entire run
 config_path <- "config/global_params.yml"
-if (!file.exists(config_path)) stop("Configuration file missing!")
+if (!file.exists(config_path)) stop("Config file not found!")
 
-# C. Pipeline Orchestration
-# --- STEP 1: Data Ingestion & CoDa Preprocessing ---
-# Handles: Excel loading -> Filter -> Zero Repl (CZM) ->  Imputation -> CLR/logit
-message("\n========================================================\nSTEP 1: STARTING DATA PROCESSING\n========================================================\n")
-source("src/01_data_processing.R", echo = FALSE)
+config <- yaml::read_yaml(config_path)
 
-# --- STEP 2: Visualization ---
-# Handles: PCA, Scree Plots, Outlier visualization
-message("\n========================================================\nSTEP 2: STARTING VISUALIZATION\n========================================================\n")
-source("src/02_visualization.R", echo = FALSE)
+# Define Output Structure
+out_root <- config$output_root
+if (!is.null(config$project_name) && config$project_name != "") {
+  out_root <- paste0(out_root, "_", config$project_name)
+}
 
-# --- STEP 3: Statistical Analysis ---
-# Handles: PERMANOVA, sPLS-DA, ILR Decoding
-message("\n========================================================\nSTEP 3: STARTING STATISTICAL ANALYSIS\n========================================================\n")
-source("src/03_statistical_analysis.R", echo = FALSE)
+if (!dir.exists(out_root)) dir.create(out_root, recursive = TRUE)
 
-# --- STEP 4: Network Inference ---
-# Handles: Bootstrap Networks, Permutation Tests, FDR
-message("\n========================================================\nSTEP 4: STARTING NETWORK INFERENCE\n========================================================\n")
-source("src/04_network_inference.R", echo = FALSE)
+# Define Log File
+timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+log_file <- file.path(out_root, paste0("pipeline_log_", timestamp, ".txt"))
 
-# --- STEP 5: Statistical Inference ---
-# Handles: Network Topology Analysis
-message("\n========================================================\nSTEP 5: STARTING NETWORK TOPOLOGY\n========================================================\n")
-source("src/05_network_topology.R", echo = FALSE)
+# Initialize Log File
+cat(sprintf("=== PIPELINE STARTED: %s ===\n", Sys.time()), file = log_file)
+message(sprintf("[System] Saving full log to: %s", log_file))
 
-# D. Completion
-message("\n========================================================\n[SUCCESS] PIPELINE FINISHED.\n========================================================\n")
+# 2. Advanced Logger Function
+# ------------------------------------------------------------------------------
+# This function captures messages/warnings, writes them to file, 
+# AND lets them pass through to the console (Real-Time Visibility)
+run_pipeline_step <- function(script_path) {
+  
+  if (!file.exists(script_path)) stop(paste("Script missing:", script_path))
+  
+  # Append separator to log
+  cat(paste0("\n>>> RUNNING: ", basename(script_path), " <<<\n"), 
+      file = log_file, append = TRUE)
+  
+  # Execute with Handlers
+  withCallingHandlers({
+    source(script_path, echo = FALSE)
+  }, 
+  # Handler for Messages (Green text in console)
+  message = function(m) {
+    cat(conditionMessage(m), file = log_file, append = TRUE, sep = "\n")
+  },
+  # Handler for Warnings
+  warning = function(w) {
+    cat(paste0("WARNING: ", conditionMessage(w)), file = log_file, append = TRUE, sep = "\n")
+  })
+}
+
+# 3. Execution Block (with Stdout Splitting)
+# ------------------------------------------------------------------------------
+# sink(split=TRUE) handles standard prints/cats, sending them to both console and file
+sink(file = log_file, append = TRUE, split = TRUE)
+
+tryCatch({
+  
+  # Step 1: Data Processing & QC
+  run_pipeline_step("src/01_data_processing.R")
+  
+  # Step 2: Visualization
+  run_pipeline_step("src/02_visualization.R")
+  
+  # Step 3: Statistical Analysis
+  run_pipeline_step("src/03_statistical_analysis.R")
+  
+  # Step 4: Network Inference
+  run_pipeline_step("src/04_network_inference.R")
+  
+  # Step 5: Network Topology
+  run_pipeline_step("src/05_network_topology.R")
+  
+  final_msg <- sprintf("\n=== PIPELINE FINISHED SUCCESSFULLY: %s ===", Sys.time())
+  message(final_msg)
+  
+}, error = function(e) {
+  # Error Handling
+  err_msg <- paste("\n[FATAL ERROR] Pipeline stopped unexpectedly.",
+                   "Error Message:", e$message, sep = "\n")
+  
+  # Write to file explicitly because sink might be unstable during error
+  cat(err_msg, file = log_file, append = TRUE)
+  # Print to console (red)
+  stop(err_msg)
+  
+}, finally = {
+  # 4. Cleanup
+  # ------------------------------------------------------------------------------
+  sink() # Turn off stdout diversion
+  options(crayon.enabled = TRUE) 
+})

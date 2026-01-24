@@ -656,3 +656,74 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
   
   # dev.off() is handled by on.exit() automatically
 }
+
+#' @title Plot Network Graph (ggraph)
+#' @description 
+#' Visualizes the inferred network.
+plot_network_structure <- function(adj_mat, weight_mat, title = "Network", 
+                                   layout_type = "nicely", min_cor = 0) { 
+  
+  # 1. Build Graph Object
+  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
+  
+  # Add attributes
+  E(g)$weight_raw <- NA
+  E(g)$sign <- NA
+  E(g)$weight <- NA 
+  
+  # Get edges
+  el <- igraph::as_data_frame(g, what = "edges")
+  
+  if (nrow(el) > 0) {
+    weights <- numeric(nrow(el))
+    signs   <- character(nrow(el))
+    keep_edge <- logical(nrow(el)) 
+    
+    for(k in 1:nrow(el)) {
+      w <- weight_mat[el[k,1], el[k,2]]
+      
+      if (abs(w) >= min_cor) {
+        keep_edge[k] <- TRUE
+        weights[k] <- abs(w)
+        signs[k]   <- ifelse(w > 0, "Positive", "Negative")
+      } else {
+        keep_edge[k] <- FALSE
+      }
+    }
+    
+    edges_to_remove <- E(g)[!keep_edge]
+    g <- delete_edges(g, edges_to_remove)
+    
+    if (ecount(g) > 0) {
+      E(g)$weight <- weights[keep_edge]
+      E(g)$sign   <- signs[keep_edge]
+    }
+  }
+  
+  V(g)$degree <- igraph::degree(g)
+  
+  # 2. Plotting (Standard ggraph logic)
+  tg <- tidygraph::as_tbl_graph(g)
+  
+  p <- ggraph(tg, layout = layout_type) + 
+    geom_edge_link(aes(width = weight, color = sign), alpha = 0.6) +
+    scale_edge_width(range = c(0.2, 1.5), guide = "none") +
+    scale_edge_color_manual(values = c("Positive" = "#00BFC4", "Negative" = "#F8766D")) +
+    
+    geom_node_point(aes(size = degree), color = "gray20", fill = "white", shape=21) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 3, max.overlaps = 20) +
+    
+    scale_size_continuous(range = c(2, 8)) +
+    labs(title = title, 
+         subtitle = sprintf("Nodes: %d | Edges: %d (Filter: |rho| > %.2f)", 
+                            vcount(g), ecount(g), min_cor),
+         edge_color = "Association") +
+    theme_void() +
+    theme(
+      plot.title = element_text(face="bold", hjust=0.5),
+      plot.subtitle = element_text(hjust=0.5, color="gray50"),
+      legend.position = "bottom"
+    )
+  
+  return(p)
+}
