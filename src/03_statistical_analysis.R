@@ -1,7 +1,7 @@
 # src/03_statistical_analysis.R
 # ==============================================================================
 # STEP 03: STATISTICAL ANALYSIS
-# Description: Hypothesis testing (PERMANOVA, sPLS-DA)
+# Description: Hypothesis testing (PERMANOVA, sPLS-DA) and ILR Decoding.
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -76,14 +76,9 @@ df_global$Group <- factor(df_global$Group, levels = target_all)
 meta_viz$Group <- factor(meta_viz$Group, levels = target_all)
 
 # --- DYNAMIC COLOR ASSIGNMENT ---
-# Use centralized palette logic from modules_viz.R
-# This ensures visual consistency between Step 02 and Step 03
 full_palette <- get_palette(config)
-
-# Filter for the specific targets of this analysis
 current_palette <- full_palette[target_all]
 
-# Validation: Ensure all targets have an assigned color
 if (any(is.na(current_palette))) {
   na_grps <- target_all[is.na(current_palette)]
   warning(paste("[Stats] Colors missing for groups:", paste(na_grps, collapse=", ")))
@@ -109,7 +104,7 @@ perm_global <- test_coda_permanova(
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
-# 4b. Global Dispersion Check
+# 4b. Global Dispersion Check (With Warning)
 # ------------------------------------------------------------------------------
 message("[Stats] Running Global Dispersion Check...")
 tryCatch({
@@ -118,10 +113,18 @@ tryCatch({
     group_col = "Group", 
     n_perm = config$stats$n_perm
   )
+  
+  # Extract p-value for Heteroscedasticity check
+  p_val_disp <- disp_global$anova_table["Groups", "Pr(>F)"]
+  if (!is.na(p_val_disp) && p_val_disp < 0.05) {
+    warning(sprintf("\n[STAT WARNING] Significant Beta-Dispersion detected (p=%.4f)!\n   -> PERMANOVA results may be driven by variance heterogeneity rather than location differences.\n   -> Interpret 'Global_PERMANOVA' with caution.", p_val_disp))
+  }
+  
   addWorksheet(wb, "Global_Dispersion_Test")
   writeData(wb, "Global_Dispersion_Test", disp_global$anova_table, rowNames = TRUE)
   addWorksheet(wb, "Global_Dispersion_Distances")
   writeData(wb, "Global_Dispersion_Distances", disp_global$group_distances)
+  
 }, error = function(e) message(paste("   [ERROR] Beta-Dispersion failed:", e$message)))
 
 # 5. sPLS-DA (Multiclass / Stratified)
@@ -134,13 +137,12 @@ if (config$multivariate$run_plsda) {
     X_pls <- df_global[, safe_markers]
     meta_stats <- meta_viz 
     
-    # Retrieve new config parameter with fallback
     n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 50
     
     pls_res <- run_splsda_model(X_pls, meta_stats, group_col = "Group", 
                                 n_comp = config$multivariate$n_comp,
                                 folds = config$multivariate$validation_folds,
-                                n_repeat = n_rep) # Explicitly passing the variable defined above
+                                n_repeat = n_rep) 
     
     top_drivers <- extract_plsda_loadings(pls_res)
     perf_metrics <- extract_plsda_performance(pls_res)
@@ -170,7 +172,6 @@ if (config$multivariate$run_plsda) {
   
   tryCatch({
     # Create Binary Labels
-    # Logic: If Group is ANY of the control groups -> Control, else Case
     meta_binary <- meta_viz %>% 
       mutate(Condition = ifelse(Group %in% config$control_group, "Control", "Case"))
     
@@ -179,13 +180,12 @@ if (config$multivariate$run_plsda) {
     
     X_pls <- df_global[, safe_markers]
     
-    # Retrieve new config parameter with fallback
     n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 50
     
     pls_res_bin <- run_splsda_model(X_pls, meta_binary, group_col = "Condition", 
                                     n_comp = config$multivariate$n_comp,
                                     folds = config$multivariate$validation_folds,
-                                    n_repeat = n_rep) # Explicitly passing the variable defined above
+                                    n_repeat = n_rep) 
     
     top_drivers_bin <- extract_plsda_loadings(pls_res_bin)
     perf_metrics_bin <- extract_plsda_performance(pls_res_bin)
@@ -207,15 +207,16 @@ if (config$multivariate$run_plsda) {
   }, error = function(e) message(paste("   [ERROR] Binary sPLS-DA Failed:", e$message)))
 }
 
-# 7. Local Analysis (ILR)
+# 7. Local Analysis (ILR Test & Decoding)
 # ------------------------------------------------------------------------------
 if (length(ilr_list) > 0) {
-  message("\n[Stats] Running Local Analysis on Compositional Groups...")
+  message("\n[Stats] Running Local Analysis on Compositional Groups (Test + Decoding)...")
   summary_local <- data.frame()
   
   for (grp_name in names(ilr_list)) {
     mat_ilr <- ilr_list[[grp_name]]
     
+    # Identify samples present in current analysis
     common_ids <- intersect(df_global$Patient_ID, rownames(mat_ilr))
     
     if (length(common_ids) < 3) {
@@ -223,10 +224,12 @@ if (length(ilr_list) > 0) {
       next 
     }
     
+    # Subset ILR matrix
     mat_ilr_sub <- mat_ilr[common_ids, , drop=FALSE]
     match_idx <- match(common_ids, df_global$Patient_ID)
     group_sub <- df_global$Group[match_idx]
     
+    # A) Run PERMANOVA on Balances
     df_stats_local <- cbind(data.frame(Group = group_sub), as.data.frame(mat_ilr_sub))
     
     res_perm <- tryCatch({
@@ -244,9 +247,30 @@ if (length(ilr_list) > 0) {
         F_Model = res_perm$F[1]
       ))
       
-      sheet_name <- substr(paste0("ILR_", grp_name), 1, 31)
-      if(!sheet_name %in% names(wb)) addWorksheet(wb, sheet_name)
-      writeData(wb, sheet_name, as.data.frame(res_perm), rowNames = TRUE)
+      # Save Test Results
+      sheet_name_test <- substr(paste0("ILR_Test_", grp_name), 1, 31)
+      if(!sheet_name_test %in% names(wb)) addWorksheet(wb, sheet_name_test)
+      writeData(wb, sheet_name_test, as.data.frame(res_perm), rowNames = TRUE)
+      
+      # B) Run Decoding (Interpretation)
+      # Retrieve the raw parts associated with this group from config to ensure correct decoding
+      target_parts <- config$hybrid_groups[[grp_name]]
+      
+      if (!is.null(target_parts)) {
+        # Subset raw matrix (Must match rows of ILR matrix exactly)
+        raw_sub <- raw_matrix[rownames(mat_ilr_sub), target_parts, drop = FALSE]
+        
+        decoding_results <- decode_ilr_to_clr(mat_ilr_sub, raw_sub, p_threshold = 0.05)
+        
+        if (nrow(decoding_results) > 0) {
+          sheet_name_interp <- substr(paste0("Interp_", grp_name), 1, 31)
+          addWorksheet(wb, sheet_name_interp)
+          writeData(wb, sheet_name_interp, decoding_results)
+          message(sprintf("      -> Decoded %s: %d correlations found.", grp_name, nrow(decoding_results)))
+        } else {
+          message(sprintf("      -> Decoded %s: No significant correlations found.", grp_name))
+        }
+      }
     }
   }
   
