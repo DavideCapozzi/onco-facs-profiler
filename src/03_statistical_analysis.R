@@ -131,10 +131,11 @@ if (length(unique(df_stats_global$Group)) > 2) {
   }
 }
 
-# 4c. Global Dispersion Check (With Warning)
+# 4c. Dispersion Check (With Warning)
 # ------------------------------------------------------------------------------
 message("[Stats] Running Global Dispersion Check...")
 tryCatch({
+  # --- Global Dispersion Test ---
   disp_global <- test_coda_dispersion(
     data_input = df_stats_global, 
     group_col = "Group", 
@@ -151,6 +152,22 @@ tryCatch({
   writeData(wb, "Global_Dispersion_Test", disp_global$anova_table, rowNames = TRUE)
   addWorksheet(wb, "Global_Dispersion_Distances")
   writeData(wb, "Global_Dispersion_Distances", disp_global$group_distances)
+  
+  # --- Pairwise Dispersion Test ---
+  if (length(unique(df_stats_global$Group)) > 2) {
+    pair_disp_res <- run_pairwise_betadisper(
+      data_input = df_stats_global,
+      group_col = "Group",
+      n_perm = config$stats$n_perm,
+      min_n = 4 # Adjusted to 4 to match the previous PERMANOVA logic for HNSCC_LS
+    )
+    
+    if (!is.null(pair_disp_res) && nrow(pair_disp_res) > 0) {
+      addWorksheet(wb, "Pairwise_Dispersion")
+      writeData(wb, "Pairwise_Dispersion", pair_disp_res)
+      message(sprintf("   -> Pairwise Dispersion results computed for %d pairs.", nrow(pair_disp_res)))
+    }
+  }
   
 }, error = function(e) message(paste("   [ERROR] Beta-Dispersion failed:", e$message)))
 
