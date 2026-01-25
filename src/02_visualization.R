@@ -99,11 +99,34 @@ highlight_map <- c()
 if (hl_pattern != "") highlight_map[[hl_pattern]] <- config$colors$highlight
 
 pdf(file.path(out_dir, "PCA_Global_Individuals.pdf"), width = 9, height = 7)
-for (dims in list(c(1,2), c(1,3), c(2,3))) {
+
+# Define dimensions to explore
+target_dims_list <- list(c(1,2), c(1,3), c(2,3))
+
+# Loop A: Individuals Plots
+for (dims in target_dims_list) {
   print(plot_pca_custom(res_pca, meta_viz, colors_viz, dims = dims, 
                         show_labels = TRUE, highlight_patterns = highlight_map))
 }
-dev.off() 
+
+# Loop B: Variables Plots (Correlation Circle) [NEW ADDITION]
+for (dims in target_dims_list) {
+  # We use the standard function from modules_viz but explicitly setting axes
+  p_var <- plot_pca_variables(res_pca) +
+    labs(title = sprintf("Variables PCA (PC%d vs PC%d)", dims[1], dims[2]))
+  
+  p_var_custom <- fviz_pca_var(res_pca, 
+                               axes = dims,
+                               col.var = "contrib", 
+                               gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+                               repel = TRUE) +
+    labs(title = sprintf("Marker Contribution (PC%d vs PC%d)", dims[1], dims[2])) +
+    theme_coda()
+  
+  print(p_var_custom)
+}
+
+dev.off()
 
 # 6. Heatmap Analysis
 # ------------------------------------------------------------------------------

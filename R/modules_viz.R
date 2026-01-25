@@ -273,9 +273,39 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
   # 4. Plotting
   p <- ggplot(plot_data, aes(x = X_Coord, y = Y_Coord, fill = Group)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "gray80") +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "gray80") +
-    stat_ellipse(geom = "polygon", alpha = 0.1, show.legend = FALSE, level = 0.95) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray80")
+  
+  # Identify groups where ellipse calculation is mathematically possible
+  valid_groups <- c()
+  unique_grps <- unique(as.character(plot_data$Group))
+  
+  for (g in unique_grps) {
+    sub_dat <- plot_data[plot_data$Group == g, c("X_Coord", "Y_Coord")]
     
+    # Attempt covariance calculation as proxy for stat_ellipse feasibility
+    is_computable <- tryCatch({
+      if (nrow(sub_dat) < 3) stop("Insufficient points")
+      # cov() will fail or return NA/Inf if variance is problematic
+      cov_mat <- cov(sub_dat)
+      if (any(is.na(cov_mat))) stop("NA in covariance")
+      TRUE
+    }, error = function(e) { FALSE })
+    
+    if (is_computable) valid_groups <- c(valid_groups, g)
+  }
+  
+  # Only add the layer if we have valid groups
+  if (length(valid_groups) > 0) {
+    p <- p + stat_ellipse(
+      data = plot_data[plot_data$Group %in% valid_groups, ],
+      geom = "polygon", 
+      alpha = 0.1, 
+      show.legend = FALSE, 
+      level = 0.95
+    )
+  }
+  
+  p <- p +
     # Points 
     geom_point(aes(color = Highlight_Type, stroke = Stroke_Size), 
                size = 3.5, shape = 21) +
