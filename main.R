@@ -12,7 +12,7 @@ graphics.off()
 # ------------------------------------------------------------------------------
 library(yaml)
 
-# DISABLE ANSI COLORS (Fixes the "strange symbols" in log file)
+# Disable ANSI colors
 options(crayon.enabled = FALSE)
 
 config_path <- "config/global_params.yml"
@@ -38,8 +38,7 @@ message(sprintf("[System] Saving full log to: %s", log_file))
 
 # 2. Advanced Logger Function
 # ------------------------------------------------------------------------------
-# This function captures messages/warnings, writes them to file, 
-# AND lets them pass through to the console (Real-Time Visibility)
+# Captures messages/warnings and writes them to file
 run_pipeline_step <- function(script_path) {
   
   if (!file.exists(script_path)) stop(paste("Script missing:", script_path))
@@ -62,9 +61,9 @@ run_pipeline_step <- function(script_path) {
   })
 }
 
-# 3. Execution Block (with Stdout Splitting)
+# 3. Execution Block 
 # ------------------------------------------------------------------------------
-# sink(split=TRUE) handles standard prints/cats, sending them to both console and file
+# sink(..., split=TRUE) handles standard prints/cats, sending them to both console and file
 sink(file = log_file, append = TRUE, split = TRUE)
 
 tryCatch({

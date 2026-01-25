@@ -31,12 +31,11 @@ if (!strat_col %in% names(DATA$metadata)) {
   stop(sprintf("Column '%s' not found in metadata.", strat_col))
 }
 
-# Define target subgroups (Robust concatenation of vectors)
+# Define target subgroups 
 target_subgroups <- unique(c(config$control_group, config$case_groups))
 message(sprintf("[Viz] Filtering dataset for targets: %s", paste(target_subgroups, collapse=", ")))
 
 # Filter metadata 
-# Note: We filter by strat_col but keep the original Macro-Group column structure
 meta_viz <- DATA$metadata %>% 
   filter(.data[[strat_col]] %in% target_subgroups)
 

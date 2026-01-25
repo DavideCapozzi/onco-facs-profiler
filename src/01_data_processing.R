@@ -86,7 +86,7 @@ mat_raw <- mat_raw[, target_markers, drop = FALSE]
 
 # 2.1 Data Assumption Validation
 # ------------------------------------------------------------------------------
-# We strictly assume input data are PERCENTAGES (0-100) based on modules_coda.R update.
+# We strictly assume input data are PERCENTAGES (0-100) 
 # This check ensures we don't accidentally process Proportions (0-1) which would
 # become tiny numbers when divided by 100.
 max_val <- max(mat_raw, na.rm = TRUE)
@@ -105,7 +105,7 @@ if (max_val <= 1.05) { # Tolerance slightly above 1.0
 message("[QC] Generating geometric proxy for robust outlier detection...")
 
 # A. Create Proxy Matrix (Fast Mode)
-# Uses the new `perform_hybrid_transformation` which correctly handles percentages
+# Uses `perform_hybrid_transformation` which correctly handles percentages
 # and uses robust epsilon replacement for QC purposes.
 proxy_results <- perform_hybrid_transformation(mat_raw, config, mode = "fast")
 mat_qc_proxy  <- proxy_results$hybrid_data_z

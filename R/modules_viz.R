@@ -184,7 +184,7 @@ viz_save_distribution_report <- function(data_df, markers, file_path, colors, hl
     return(NULL)
   }
   
-  message(sprintf("   [Viz] Saving distribution report to: %s", basename(file_path)))
+  message(sprintf("   [Viz] Saving distribution plots to: %s", basename(file_path)))
   
   pdf(file_path, width = 8, height = 6)
   # Ensure device is closed even if the loop crashes
@@ -209,21 +209,6 @@ viz_save_distribution_report <- function(data_df, markers, file_path, colors, hl
   }
   
   dev.off()
-}
-
-#' @title Run PCA on Compositional Data
-#' @description Wraps FactoMineR::PCA with settings appropriate for CLR data.
-#' @param data_matrix A numeric matrix (CLR transformed markers).
-#' @return A PCA result object.
-run_coda_pca <- function(data_matrix) {
-  # Validation
-  if (any(is.na(data_matrix))) stop("PCA Input contains NAs. Fix upstream.")
-  
-  # Run PCA
-  # scale.unit = FALSE is crucial for CLR data to preserve Aitchison geometry.
-  res_pca <- FactoMineR::PCA(data_matrix, scale.unit = FALSE, graph = FALSE)
-  
-  return(res_pca)
 }
 
 #' @title Custom PCA Biplot with Multi-Pattern Highlighting
@@ -350,7 +335,7 @@ plot_stratification_heatmap <- function(mat_z, metadata, annotation_colors_list,
     stop("Mismatch between matrix rownames and metadata Patient_ID")
   }
   
-  # [FIX] Ensure metadata is a pure data.frame (not tibble) for HeatmapAnnotation
+  # Ensure metadata is a pure data.frame (not tibble) for HeatmapAnnotation
   metadata_clean <- as.data.frame(metadata)
   
   # 2. Setup Annotations
@@ -532,7 +517,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     stop(sprintf("Column '%s' not found in metadata for sPLS-DA visualization.", group_col))
   }
   
-  # [FIX] Open PDF and ensure it closes using on.exit immediately
+  # Open PDF and ensure it closes using on.exit immediately
   pdf(out_path, width = 11, height = 8)
   # This ensures dev.off() is called even if the code below crashes
   on.exit(try(dev.off(), silent = TRUE), add = TRUE) 
