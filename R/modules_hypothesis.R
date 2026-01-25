@@ -101,3 +101,89 @@ test_coda_permanova <- function(data_input, group_col = "Group", metadata_cols =
   
   return(res_adonis)
 }
+
+#' @title Run Pairwise PERMANOVA
+#' @description 
+#' Performs pairwise comparisons between all levels of a grouping factor using adonis2.
+#' Automatically filters comparisons where sample size is insufficient.
+#' Includes Benjamini-Hochberg FDR correction.
+#' 
+#' @param data_input Dataframe with metadata and numeric data.
+#' @param group_col String. Name of the grouping column.
+#' @param metadata_cols Vector of columns to exclude.
+#' @param n_perm Integer. Number of permutations.
+#' @param min_n Integer. Minimum sample size per group required to run the test.
+#' @return A dataframe of pairwise results.
+run_pairwise_permanova <- function(data_input, group_col = "Group", 
+                                   metadata_cols = c("Patient_ID"), 
+                                   n_perm = 999, min_n = 5) {
+  requireNamespace("vegan", quietly = TRUE)
+  requireNamespace("utils", quietly = TRUE)
+  
+  # Setup Data
+  cols_to_exclude <- c(metadata_cols, group_col)
+  numeric_data <- data_input[, !names(data_input) %in% cols_to_exclude, drop = FALSE]
+  mat <- as.matrix(numeric_data)
+  groups <- as.factor(data_input[[group_col]])
+  levels_vec <- levels(groups)
+  
+  if (length(levels_vec) < 2) return(NULL)
+  
+  # Generate all unique pairs
+  pairs <- utils::combn(levels_vec, 2, simplify = FALSE)
+  results <- data.frame()
+  
+  message(sprintf("   [Stats] Running Pairwise PERMANOVA on %d pairs (Min N=%d)...", 
+                  length(pairs), min_n))
+  
+  for (pair in pairs) {
+    g1 <- pair[1]
+    g2 <- pair[2]
+    
+    # Subset data for the current pair
+    idx <- groups %in% c(g1, g2)
+    sub_mat <- mat[idx, , drop = FALSE]
+    sub_grps <- droplevels(groups[idx])
+    
+    # Check sample sizes
+    n_g1 <- sum(sub_grps == g1)
+    n_g2 <- sum(sub_grps == g2)
+    
+    # Skip if insufficient data (Robustness check for small groups like HNSCC_LS)
+    if (n_g1 < min_n || n_g2 < min_n) {
+      warning(sprintf("      [Skip] %s vs %s (N=%d/%d < %d)", g1, g2, n_g1, n_g2, min_n))
+      next
+    }
+    
+    tryCatch({
+      # Run adonis2 on the subset
+      res <- vegan::adonis2(sub_mat ~ sub_grps, method = "euclidean", permutations = n_perm)
+      
+      p_val <- res$`Pr(>F)`[1]
+      r2    <- res$R2[1]
+      f_val <- res$F[1]
+      
+      results <- rbind(results, data.frame(
+        Group1 = g1, 
+        Group2 = g2,
+        N1 = n_g1,
+        N2 = n_g2,
+        R2_Percent = round(r2 * 100, 2),
+        F_Model = round(f_val, 2),
+        P_Value = p_val,
+        stringsAsFactors = FALSE
+      ))
+    }, error = function(e) {
+      warning(paste("      [Fail] Pairwise PERMANOVA failed for", g1, "vs", g2))
+    })
+  }
+  
+  # Apply FDR Correction (Benjamini-Hochberg) across all tests performed
+  if (nrow(results) > 0) {
+    results$FDR <- p.adjust(results$P_Value, method = "BH")
+    # Reorder by significance
+    results <- results[order(results$P_Value), ]
+  }
+  
+  return(results)
+}

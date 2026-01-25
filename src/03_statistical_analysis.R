@@ -104,7 +104,34 @@ perm_global <- test_coda_permanova(
 addWorksheet(wb, "Global_PERMANOVA")
 writeData(wb, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
-# 4b. Global Dispersion Check (With Warning)
+# 4b. Pairwise PERMANOVA (Post-Hoc)
+# ------------------------------------------------------------------------------
+# Only run if we have more than 2 groups
+if (length(unique(df_stats_global$Group)) > 2) {
+  message("[Stats] Detecting >2 groups. Running Pairwise Post-Hoc Tests...")
+  
+  # We set min_n=4 to allow HNSCC_LS (n=4) strictly if needed, 
+  # but n=5 is recommended for statistical stability. 
+  # Given user context: HNSCC_LS is n=4. 
+  # If we want to see it, we must lower min_n to 4, accepting low power.
+  
+  pair_res <- run_pairwise_permanova(
+    data_input = df_stats_global, 
+    group_col = "Group", 
+    n_perm = config$stats$n_perm,
+    min_n = 4  # Adjusted to 4 to include HNSCC_LS as requested, though underpowered.
+  )
+  
+  if (!is.null(pair_res) && nrow(pair_res) > 0) {
+    addWorksheet(wb, "Pairwise_PERMANOVA")
+    writeData(wb, "Pairwise_PERMANOVA", pair_res)
+    message(sprintf("   -> Pairwise results computed for %d pairs.", nrow(pair_res)))
+  } else {
+    message("   -> No pairs met the sample size criteria (min_n) for Pairwise PERMANOVA.")
+  }
+}
+
+# 4c. Global Dispersion Check (With Warning)
 # ------------------------------------------------------------------------------
 message("[Stats] Running Global Dispersion Check...")
 tryCatch({
@@ -127,7 +154,7 @@ tryCatch({
   
 }, error = function(e) message(paste("   [ERROR] Beta-Dispersion failed:", e$message)))
 
-# 5. sPLS-DA (Multiclass / Stratified)
+# 5a. sPLS-DA (Multiclass / Stratified)
 # ------------------------------------------------------------------------------
 if (config$multivariate$run_plsda) {
   message(sprintf("   [sPLS-DA] Fitting STRATIFIED model (Multiclass)..."))
@@ -164,7 +191,7 @@ if (config$multivariate$run_plsda) {
   }, error = function(e) message(paste("   [ERROR] Stratified sPLS-DA Failed:", e$message)))
 }
 
-# 6. sPLS-DA (Binary: Control vs Case)
+# 5b. sPLS-DA (Binary: Control vs Case)
 # ------------------------------------------------------------------------------
 if (config$multivariate$run_plsda) {
   message(sprintf("   [sPLS-DA] Fitting BINARY model (Pooled Control vs Pooled Cases)..."))
@@ -207,7 +234,7 @@ if (config$multivariate$run_plsda) {
   }, error = function(e) message(paste("   [ERROR] Binary sPLS-DA Failed:", e$message)))
 }
 
-# 7. Local Analysis (ILR Test & Decoding)
+# 6. Local Analysis (ILR Test & Decoding)
 # ------------------------------------------------------------------------------
 if (length(ilr_list) > 0) {
   message("\n[Stats] Running Local Analysis on Compositional Groups (Test + Decoding)...")
