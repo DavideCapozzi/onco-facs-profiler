@@ -28,10 +28,13 @@ marker_selection:
   whitelist: []      
   blacklist: [] 
 
+sample_selection:
+  blacklist: ["DS51.fcs"]  
+
 hybrid_groups:
-  Differentiation: ["CM", "EFF", "EM", "NAIVE"]
-  Lineage: ["CD4", "CD8"]  
-  Treg_Status: ["RESTING", "ACTIVE", "NON-SUPPRESSIVE"]
+  Differentiation: []
+  Lineage: []  
+  Treg_Status: []
   
 metadata:
   subgroup_col: "Original_Source"
@@ -75,7 +78,7 @@ qc:
   max_na_row_pct: 0.55   
   max_na_col_pct: 0.20  
   remove_outliers: true
-  outlier_conf_level: 0.99 
+  outlier_conf_level: 0.99
 
 # --- Imputation (CoDa) ---
 imputation:

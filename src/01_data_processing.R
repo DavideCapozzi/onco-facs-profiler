@@ -41,6 +41,35 @@ metadata_raw <- raw_data[, meta_cols]
 
 message(sprintf("[Data] Initial Matrix: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
+# --- Sample Filtering (Blacklist) ---
+target_samples <- rownames(mat_raw)
+dropped_samples_apriori <- data.frame()
+
+if (!is.null(config$sample_selection$blacklist) && length(config$sample_selection$blacklist) > 0) {
+  blacklist_samples <- config$sample_selection$blacklist
+  
+  # Identify samples to drop that actually exist in data
+  samples_to_drop <- intersect(target_samples, blacklist_samples)
+  
+  if (length(samples_to_drop) > 0) {
+    message(sprintf("[Data] Dropping %d samples defined in blacklist.", length(samples_to_drop)))
+    
+    # Store details for QC report
+    dropped_indices <- which(rownames(mat_raw) %in% samples_to_drop)
+    dropped_samples_apriori <- data.frame(
+      Patient_ID = samples_to_drop,
+      Reason = "Excluded by Config (A Priori)",
+      Group_Info = if (subgroup_col %in% colnames(metadata_raw)) metadata_raw[dropped_indices, subgroup_col] else "N/A"
+    )
+    
+    # Apply filter
+    target_samples <- setdiff(target_samples, samples_to_drop)
+    mat_raw <- mat_raw[target_samples, , drop = FALSE]
+    metadata_raw <- metadata_raw[match(target_samples, metadata_raw$Patient_ID), , drop = FALSE]
+    raw_data <- raw_data %>% filter(Patient_ID %in% target_samples)
+  }
+}
+
 # --- Marker Filtering (Whitelist/Blacklist) ---
 target_markers <- colnames(mat_raw)
 if (!is.null(config$marker_selection$whitelist) && length(config$marker_selection$whitelist) > 0) {
@@ -80,10 +109,16 @@ mat_qc_proxy  <- proxy_results$hybrid_data_z
 
 # B. Run QC on the Proxy Matrix
 # This step identifies rows/cols to drop.
-qc_result_proxy <- run_qc_pipeline(mat_qc_proxy, metadata_raw, config$qc, dropped_apriori = data.frame())
+qc_result_proxy <- run_qc_pipeline(
+  mat_raw = mat_qc_proxy, 
+  metadata = metadata_raw, 
+  qc_config = config$qc, 
+  stratification_col = config$metadata$subgroup_col,
+  dropped_markers_apriori = data.frame(), # If tracked previously, pass it here
+  dropped_samples_apriori = dropped_samples_apriori
+)
 
 # C. Apply Filters to ORIGINAL Raw Data (Synchronization)
-# CRITICAL: Since `impute_matrix_bpca` no longer drops columns silently, 
 # this step ensures that `mat_raw` is clean before proceeding.
 valid_patients <- rownames(qc_result_proxy$data)
 valid_markers  <- colnames(qc_result_proxy$data)

@@ -99,22 +99,40 @@ detect_pca_outliers <- function(mat, groups, conf_level = 0.99) {
 #' @title Run Quality Control Pipeline
 #' @description 
 #' Filters the data matrix based on variance, missingness, and multivariate outliers.
-#' Logs dropped items and updates the summary report.
+#' Logs dropped items and updates the summary report with group breakdowns.
 #' 
 #' @param mat_raw Raw numeric matrix (Samples x Markers).
 #' @param metadata Dataframe containing Group information (must align with mat_raw).
-#' @param qc_config List containing thresholds (max_na, outlier_conf_level).
-#' @param dropped_apriori Dataframe of markers dropped by whitelist/blacklist.
+#' @param qc_config List containing thresholds.
+#' @param stratification_col String. Column name for detailed group breakdown (e.g., Original_Source).
+#' @param dropped_markers_apriori Dataframe of markers dropped by config.
+#' @param dropped_samples_apriori Dataframe of samples dropped by config.
 #' @return A list containing the filtered 'data' and the 'report'.
-run_qc_pipeline <- function(mat_raw, metadata, qc_config, dropped_apriori = NULL) {
+run_qc_pipeline <- function(mat_raw, metadata, qc_config, 
+                            stratification_col = "Group",
+                            dropped_markers_apriori = NULL,
+                            dropped_samples_apriori = NULL) {
   
   message("[QC] Running Quality Control...")
+  
+  # Helper to calculate group counts
+  get_group_counts <- function(meta, col_name) {
+    if (is.null(col_name) || !col_name %in% colnames(meta)) return(NULL)
+    return(table(meta[[col_name]]))
+  }
+  
+  # 0. Initial Statistics
+  init_counts <- get_group_counts(metadata, stratification_col)
   
   # Initialize QC Summary Object
   qc_summary <- list(
     n_row_init = nrow(mat_raw),
     n_col_init = ncol(mat_raw),
-    dropped_markers_apriori = dropped_apriori,
+    breakdown_init = init_counts, # [NEW] Store initial group breakdown
+    
+    dropped_markers_apriori = dropped_markers_apriori,
+    dropped_samples_apriori = dropped_samples_apriori, # [NEW] Store a priori dropped samples
+    
     n_col_zerovar = 0,
     dropped_rows_detail = data.frame(Patient_ID = character(), NA_Percent = numeric(), Reason = character()),
     dropped_cols_detail = data.frame(Marker = character(), NA_Percent = numeric()),
@@ -204,11 +222,13 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config, dropped_apriori = NULL
   qc_summary$n_row_final <- nrow(curr_mat)
   qc_summary$n_col_final <- ncol(curr_mat)
   
+  qc_summary$breakdown_final <- get_group_counts(curr_meta, stratification_col)
+  
   message(sprintf("   [QC] Final Dimensions: %d Samples x %d Markers", nrow(curr_mat), ncol(curr_mat)))
   
   return(list(
     data = curr_mat,
-    metadata = curr_meta, # Return filtered metadata too
+    metadata = curr_meta, 
     report = qc_summary
   ))
 }
