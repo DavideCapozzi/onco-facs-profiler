@@ -128,13 +128,15 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
   qc_summary <- list(
     n_row_init = nrow(mat_raw),
     n_col_init = ncol(mat_raw),
-    breakdown_init = init_counts, # [NEW] Store initial group breakdown
+    breakdown_init = init_counts, 
     
     dropped_markers_apriori = dropped_markers_apriori,
-    dropped_samples_apriori = dropped_samples_apriori, # [NEW] Store a priori dropped samples
+    dropped_samples_apriori = dropped_samples_apriori, 
     
     n_col_zerovar = 0,
-    dropped_rows_detail = data.frame(Patient_ID = character(), NA_Percent = numeric(), Reason = character()),
+    dropped_rows_detail = data.frame(Patient_ID = character(), NA_Percent = numeric(), 
+                                     Reason = character(), Original_Source = character(),
+                                     stringsAsFactors = FALSE),
     dropped_cols_detail = data.frame(Marker = character(), NA_Percent = numeric()),
     n_row_dropped = 0,
     n_col_dropped = 0
@@ -162,10 +164,17 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
     message(sprintf("   [QC] Dropping %d patients with >%.0f%% missingness.", 
                     length(pids), qc_config$max_na_row_pct * 100))
     
+    # Capture Original_Source info for report
+    group_info <- if(stratification_col %in% colnames(curr_meta)) {
+      as.character(curr_meta[[stratification_col]][drop_row_na])
+    } else { rep("N/A", length(pids)) }
+    
     qc_summary$dropped_rows_detail <- rbind(qc_summary$dropped_rows_detail, data.frame(
       Patient_ID = pids,
       NA_Percent = round(row_na_freq[drop_row_na] * 100, 2),
-      Reason = "High Missingness"
+      Reason = "High Missingness",
+      Original_Source = group_info,
+      stringsAsFactors = FALSE
     ))
     
     curr_mat <- curr_mat[-drop_row_na, , drop = FALSE]
@@ -194,7 +203,7 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
   if (!is.null(qc_config$remove_outliers) && qc_config$remove_outliers) {
     message("   [QC] Checking for multivariate outliers (PCA-based)...")
     
-    # We need the grouping variable. Assuming 'Group' column exists in metadata.
+    # We use 'Group' for calculation
     if ("Group" %in% names(curr_meta)) {
       is_outlier <- detect_pca_outliers(curr_mat, curr_meta$Group, 
                                         conf_level = qc_config$outlier_conf_level)
@@ -203,10 +212,16 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
         out_pids <- rownames(curr_mat)[is_outlier]
         message(sprintf("   [QC] Dropping %d outliers detected based on group distribution.", length(out_pids)))
         
+        # Capture Original_Source info for report
+        target_info_col <- if(stratification_col %in% colnames(curr_meta)) stratification_col else "Group"
+        group_info <- as.character(curr_meta[[target_info_col]][is_outlier])
+        
         qc_summary$dropped_rows_detail <- rbind(qc_summary$dropped_rows_detail, data.frame(
           Patient_ID = out_pids,
           NA_Percent = round(rowMeans(is.na(curr_mat[is_outlier,,drop=FALSE])) * 100, 2),
-          Reason = "Multivariate Outlier"
+          Reason = "Outlier",
+          Original_Source = group_info,
+          stringsAsFactors = FALSE
         ))
         
         curr_mat <- curr_mat[!is_outlier, , drop = FALSE]

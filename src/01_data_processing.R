@@ -56,10 +56,13 @@ if (!is.null(config$sample_selection$blacklist) && length(config$sample_selectio
     
     # Store details for QC report
     dropped_indices <- which(rownames(mat_raw) %in% samples_to_drop)
+    
     dropped_samples_apriori <- data.frame(
       Patient_ID = samples_to_drop,
-      Reason = "Excluded by Config (A Priori)",
-      Group_Info = if (subgroup_col %in% colnames(metadata_raw)) metadata_raw[dropped_indices, subgroup_col] else "N/A"
+      NA_Percent = NA, 
+      Reason = "A Priori",
+      Original_Source = if (subgroup_col %in% colnames(metadata_raw)) as.character(metadata_raw[dropped_indices, subgroup_col]) else "N/A",
+      stringsAsFactors = FALSE
     )
     
     # Apply filter

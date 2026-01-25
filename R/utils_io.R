@@ -148,12 +148,29 @@ save_qc_report <- function(qc_list, out_path) {
   
   curr_row <- 1
   
-  # Write Dropped Samples (A Priori)
+  dropped_patients_all <- data.frame()
+  
+  # 1. Combine A Priori Drops
   if (!is.null(qc_list$dropped_samples_apriori) && nrow(qc_list$dropped_samples_apriori) > 0) {
-    writeData(wb, "Details_Dropped", "Samples Excluded by Config (A Priori - Blacklist):", startRow = curr_row)
+    dropped_patients_all <- rbind(dropped_patients_all, qc_list$dropped_samples_apriori)
+  }
+  
+  # 2. Combine QC Drops
+  if (!is.null(qc_list$dropped_rows_detail) && nrow(qc_list$dropped_rows_detail) > 0) {
+    dropped_patients_all <- rbind(dropped_patients_all, qc_list$dropped_rows_detail)
+  }
+  
+  # Write the unified table
+  if (nrow(dropped_patients_all) > 0) {
+    cols_order <- intersect(c("Patient_ID", "NA_Percent", "Reason", "Original_Source"), names(dropped_patients_all))
+    cols_order <- c(cols_order, setdiff(names(dropped_patients_all), cols_order))
+    
+    dropped_patients_all <- dropped_patients_all[, cols_order, drop=FALSE]
+    
+    writeData(wb, "Details_Dropped", "Dropped Patients (A priori & QC Filtering):", startRow = curr_row)
     curr_row <- curr_row + 1
-    writeData(wb, "Details_Dropped", qc_list$dropped_samples_apriori, startRow = curr_row)
-    curr_row <- curr_row + nrow(qc_list$dropped_samples_apriori) + 3
+    writeData(wb, "Details_Dropped", dropped_patients_all, startRow = curr_row)
+    curr_row <- curr_row + nrow(dropped_patients_all) + 3
   }
   
   # Write Dropped Markers (A Priori)
@@ -162,14 +179,6 @@ save_qc_report <- function(qc_list, out_path) {
     curr_row <- curr_row + 1
     writeData(wb, "Details_Dropped", qc_list$dropped_markers_apriori, startRow = curr_row)
     curr_row <- curr_row + nrow(qc_list$dropped_markers_apriori) + 3
-  }
-  
-  # Write Dropped Patients (QC)
-  if (nrow(qc_list$dropped_rows_detail) > 0) {
-    writeData(wb, "Details_Dropped", "Dropped Patients (QC - High NA or Outliers):", startRow = curr_row)
-    curr_row <- curr_row + 1
-    writeData(wb, "Details_Dropped", qc_list$dropped_rows_detail, startRow = curr_row)
-    curr_row <- curr_row + nrow(qc_list$dropped_rows_detail) + 3
   }
   
   # Write Dropped Markers (QC)
