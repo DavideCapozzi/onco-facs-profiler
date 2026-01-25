@@ -77,9 +77,7 @@ if (nrow(mat_ctrl) < 5 || nrow(mat_case) < 5) stop("Insufficient sample size (<5
 
 # 5. Global Lambda (For Bootstrap Stability)
 # ------------------------------------------------------------------------------
-lambda_ctrl <- corpcor::estimate.lambda(mat_ctrl, verbose = FALSE)
-lambda_case <- corpcor::estimate.lambda(mat_case, verbose = FALSE)
-message(sprintf("[Config] Lambda (Stability): Control=%.4f | Case=%.4f", lambda_ctrl, lambda_case))
+message("[Inference] Lambda Strategy: Dynamic (James-Stein estimated per resample)")
 
 # Cleanup potential zombie processes from previous runs
 try(parallel::stopCluster(cl), silent = TRUE)
@@ -97,21 +95,24 @@ tryCatch({
   
   # 6. Bootstrap Inference (Stability)
   # ------------------------------------------------------------------------------
-  run_parallel_bootstrap <- function(data_mat, n_boot, seed_val, fixed_lambda) {
+  run_parallel_bootstrap <- function(data_mat, n_boot, seed_val) {
     n_samples <- nrow(data_mat)
     parallel::clusterSetRNGStream(cl, seed_val)
     foreach(i = 1:n_boot, .packages = c("corpcor")) %dopar% {
-      boot_worker_pcor(data_mat, n_samples, lambda_val = fixed_lambda)
+      # Pass NULL to lambda_val to trigger dynamic estimation in modules_network.R
+      boot_worker_pcor(data_mat, n_samples, lambda_val = NULL)
     }
   }
   
   message("[Inference] Bootstrapping Control...")
-  boot_ctrl <- run_parallel_bootstrap(mat_ctrl, config$stats$n_boot, config$stats$seed, lambda_ctrl)
+  # Removed lambda argument from call
+  boot_ctrl <- run_parallel_bootstrap(mat_ctrl, config$stats$n_boot, config$stats$seed)
   res_ctrl <- aggregate_boot_results(boot_ctrl, alpha = config$stats$alpha)
   check_boot_yield(res_ctrl, config$stats$n_boot, "Control")
   
   message("[Inference] Bootstrapping Case...")
-  boot_case <- run_parallel_bootstrap(mat_case, config$stats$n_boot, config$stats$seed + 1000, lambda_case)
+  # Removed lambda argument from call
+  boot_case <- run_parallel_bootstrap(mat_case, config$stats$n_boot, config$stats$seed + 1000)
   res_case <- aggregate_boot_results(boot_case, alpha = config$stats$alpha)
   check_boot_yield(res_case, config$stats$n_boot, "Case")
   
