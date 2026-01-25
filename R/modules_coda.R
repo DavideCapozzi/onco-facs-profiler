@@ -354,7 +354,13 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
       mat_comp_raw <- mat_comp_raw[, -empty_cols, drop = FALSE]
     }
     
-    if (ncol(mat_comp_raw) > 0) {
+    if (ncol(mat_comp_raw) == 1) {
+      message(sprintf("   [CoDa] Group reduced to 1 marker (%s). Moving to Functional Track.", colnames(mat_comp_raw)))
+      # Move to func markers and skip Track A
+      mat_func_raw <- cbind(mat_func_raw, mat_comp_raw) 
+      
+      mat_comp_trans <- NULL 
+    } else if (ncol(mat_comp_raw) > 0) {
       if (mode == "complete") {
         mat_comp_clean <- coda_replace_zeros(mat_comp_raw)
         if (any(is.na(mat_comp_clean))) {

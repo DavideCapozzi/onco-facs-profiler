@@ -47,15 +47,25 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
   
   # Define grid of keepX to test: from 5 markers up to all markers
   n_vars <- ncol(X)
-  list_keepX <- c(seq(5, min(30, n_vars), by = 5))
-  # Logic adapted for small datasets (<5 features)
+  
   if (n_vars < 5) {
     list_keepX <- c(n_vars)
   } else {
-    list_keepX <- c(seq(5, min(30, n_vars), by = 5))
-    if (n_vars > 30) list_keepX <- c(list_keepX, n_vars)
+    # Sequence of 5s
+    list_keepX <- seq(5, min(30, n_vars), by = 5)
+    
+    # Always include the full set of variables if small enough, or at least the max cap
+    max_val <- min(30, n_vars)
+    if (!max_val %in% list_keepX) {
+      list_keepX <- c(list_keepX, max_val)
+    }
+    
+    # Strictly include n_vars if it's <= 30 and not in list
+    if (n_vars <= 30 && !n_vars %in% list_keepX) {
+      list_keepX <- c(list_keepX, n_vars)
+    }
   }
-  list_keepX <- unique(list_keepX)
+  list_keepX <- sort(unique(list_keepX))
   
   # Run Tuning (tune.splsda)
   tune_splsda <- mixOmics::tune.splsda(
