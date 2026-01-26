@@ -54,7 +54,21 @@ coda_replace_zeros <- function(mat) {
   has_na <- any(na_locs)
   mat_temp <- mat
   
-  # 1. Temporary Fill (if NAs exist) to allow cmultRepl to run on Zeros
+  # 1. Check for Mixed Zero/NA Rows (Ghost Effect Risk)
+  # If a sample has both 0s and NAs, the temporary imputation of NAs 
+  # might slightly bias the zero replacement (geometric mean shift).
+  if (has_na) {
+    n_mixed <- sum(rowSums(mat == 0, na.rm = TRUE) > 0 & rowSums(na_locs) > 0)
+    
+    if (n_mixed > 0) {
+      warning(sprintf(
+        "[CoDa] Warning: %d samples contain both Zeros and NAs in the same group.\n       Temporary NA masking may induce slight bias in zero replacement (Ghost Effect).", 
+        n_mixed
+      ))
+    }
+  }
+  
+  # 2. Temporary Fill (if NAs exist) to allow cmultRepl to run on Zeros
   if (has_na) {
     for(j in 1:ncol(mat_temp)) {
       if(any(na_locs[,j])) {
@@ -64,7 +78,7 @@ coda_replace_zeros <- function(mat) {
     }
   }
   
-  # 2. Apply cmultRepl
+  # 3. Apply cmultRepl
   tryCatch({
     clean_mat <- zCompositions::cmultRepl(
       X = mat_temp,
@@ -74,7 +88,7 @@ coda_replace_zeros <- function(mat) {
       suppress.print = TRUE 
     )
     
-    # 3. Restore NAs (Actual imputation happens in next step)
+    # 4. Restore NAs (Actual imputation happens in next step)
     if (has_na) {
       clean_mat[na_locs] <- NA
     }
