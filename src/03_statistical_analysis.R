@@ -119,7 +119,7 @@ if (length(unique(df_stats_global$Group)) > 2) {
     data_input = df_stats_global, 
     group_col = "Group", 
     n_perm = config$stats$n_perm,
-    min_n = 4  # Adjusted to 4 to include HNSCC_LS as requested, though underpowered.
+    min_n = config$stats$min_sample_size
   )
   
   if (!is.null(pair_res) && nrow(pair_res) > 0) {
@@ -159,7 +159,7 @@ tryCatch({
       data_input = df_stats_global,
       group_col = "Group",
       n_perm = config$stats$n_perm,
-      min_n = 4 # Adjusted to 4 to match the previous PERMANOVA logic for HNSCC_LS
+      min_n = config$stats$min_sample_size
     )
     
     if (!is.null(pair_disp_res) && nrow(pair_disp_res) > 0) {

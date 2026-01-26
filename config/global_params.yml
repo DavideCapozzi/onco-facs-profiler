@@ -5,7 +5,7 @@
 # --- Setup ---
 output_root: "results"
 project_name: "longsurvivors"
-input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4.xlsx"
+input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4_anonimo.xlsx"
 
 # --- ANALYSIS TARGETS ---
 # Define here exactly which groups form the analysis.
@@ -23,14 +23,15 @@ stratification:
 cohorts:
   NSCLC: "NSCLC"
   HNSCC: "HNSCC"
-  Healthy_Donors: "Healthy_Donors"
+  Healthy_Donors: "HD"
 
 marker_selection:
   whitelist: []      
   blacklist: [] 
 
 sample_selection:
-  blacklist: ["DS51.fcs"]  
+  #blacklist: ["DS51.fcs"]
+  blacklist: ["HD51"]  
 
 hybrid_groups:
   Differentiation: []
@@ -97,6 +98,7 @@ multivariate:
 # --- Inference Statistics ---
 stats:
   seed: 2025
+  min_sample_size: 4
   n_boot: 1000        
   n_perm: 2000        
   alpha: 0.05         
