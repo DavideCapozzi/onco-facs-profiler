@@ -236,6 +236,7 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
   qc_summary$n_row_dropped <- nrow(qc_summary$dropped_rows_detail)
   qc_summary$n_row_final <- nrow(curr_mat)
   qc_summary$n_col_final <- ncol(curr_mat)
+  qc_summary$final_markers_names <- colnames(curr_mat)
   
   qc_summary$breakdown_final <- get_group_counts(curr_meta, stratification_col)
   
