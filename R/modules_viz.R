@@ -126,8 +126,11 @@ plot_raw_distribution_merged <- function(data_df, marker_name, colors,
   n_na <- sum(is.na(plot_data$Value))
   pct_na <- round((n_na / nrow(plot_data)) * 100, 1)
   
-  # 4. Plotting
-  p <- ggplot(plot_data, aes(x = Group, y = Value, fill = Group)) +
+  # 4. Explicitly remove NAs 
+  plot_data_clean <- plot_data %>% filter(!is.na(Value))
+  
+  # 5. Plotting
+  p <- ggplot(plot_data_clean, aes(x = Group, y = Value, fill = Group)) +
     
     # Layer 1: Violin
     geom_violin(alpha = 0.4, trim = FALSE, color = NA, scale = "width") +
@@ -331,7 +334,7 @@ plot_pca_custom <- function(pca_res, metadata, colors, dims = c(1, 2),
   }
   
   if (show_labels) {
-    p <- p + geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE, max.overlaps = 15)
+    p <- p + geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE, max.overlaps = 40)
   }
   
   return(p)
