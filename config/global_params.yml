@@ -105,3 +105,28 @@ stats:
   fdr_threshold: 0.1 
   n_cores: "auto"
 
+# --- ANALYSIS SCENARIOS (Config-Driven Orchestration) ---
+# Each item here triggers a full analysis cycle (Hypothesis -> Multivariate -> Network)
+analysis_scenarios:
+  - id: "01_Benchmark_Disease"
+    description: "Characterizing the disease signature (All Cancer vs Healthy)"
+    case_label: "Total_Cancer"
+    case_groups: ["HNSCC", "NSCLC"]
+    control_label: "Healthy_Ref"
+    control_groups: ["Healthy_Donors"]
+    
+  - id: "02_Normalization_Check"
+    description: "Checking if Long Survivors return to homeostasis"
+    case_label: "Total_LS"
+    case_groups: ["HNSCC_LS", "NSCLC_LS"]
+    control_label: "Healthy_Ref"
+    control_groups: ["Healthy_Donors"]
+    
+  - id: "03_Resistance_Mechanism"
+    description: "Identifying resistance features (LS vs Progressors)"
+    case_label: "Total_LS"
+    case_groups: ["HNSCC_LS", "NSCLC_LS"]
+    control_label: "Total_Cancer"
+    control_groups: ["HNSCC", "NSCLC"]
+
+EOF: TRUE

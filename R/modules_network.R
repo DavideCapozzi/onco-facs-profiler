@@ -139,3 +139,72 @@ export_cytoscape_edges <- function(adj_mat, weight_mat) {
     dplyr::rename(Source = from, Target = to) %>%
     ungroup()
 }
+
+#' @title Infer Differential Network
+#' @description 
+#' Calculates the difference in correlation structure between two conditions.
+#' Returns a table of edges that change significantly between Case and Control.
+#' 
+#' @param mat_ctrl Numeric matrix for Control group.
+#' @param mat_case Numeric matrix for Case group.
+#' @param method Correlation method ("spearman" or "pearson").
+#' @param n_bootstrap Number of bootstraps (placeholder for future implementation).
+#' @return A list containing the edge table.
+infer_differential_network <- function(mat_ctrl, mat_case, method = "spearman", n_bootstrap = 100) {
+  
+  # Safety Checks
+  if (ncol(mat_ctrl) != ncol(mat_case)) stop("Matrices must have same columns.")
+  
+  # Compute Correlations
+  # Use use="pairwise.complete.obs" to handle potential NAs robustly
+  cor_ctrl <- cor(mat_ctrl, method = method, use = "pairwise.complete.obs")
+  cor_case <- cor(mat_case, method = method, use = "pairwise.complete.obs")
+  
+  # Replace NAs with 0 (if variance was 0 for some features)
+  cor_ctrl[is.na(cor_ctrl)] <- 0
+  cor_case[is.na(cor_case)] <- 0
+  
+  # Calculate Difference matrix
+  diff_mat <- cor_case - cor_ctrl
+  
+  # Flatten to Edge List (Upper triangle only)
+  edges <- list()
+  markers <- colnames(mat_ctrl)
+  
+  count <- 1
+  for (i in 1:(length(markers)-1)) {
+    for (j in (i+1):length(markers)) {
+      m1 <- markers[i]
+      m2 <- markers[j]
+      
+      w_ctrl <- cor_ctrl[i, j]
+      w_case <- cor_case[i, j]
+      delta  <- diff_mat[i, j]
+      
+      # Filter noise: Keep edge only if correlation is strong in at least one condition
+      # OR if the shift is massive (> 0.4)
+      if (abs(w_ctrl) > 0.3 || abs(w_case) > 0.3 || abs(delta) > 0.4) {
+        edges[[count]] <- data.frame(
+          Node1 = m1,
+          Node2 = m2,
+          Weight_Ctrl = round(w_ctrl, 3),
+          Weight_Case = round(w_case, 3),
+          Diff_Score = round(delta, 3),
+          Type = ifelse(delta > 0, "Strengthened", "Weakened"),
+          stringsAsFactors = FALSE
+        )
+        count <- count + 1
+      }
+    }
+  }
+  
+  if (length(edges) > 0) {
+    edges_df <- do.call(rbind, edges)
+    # Sort by absolute difference
+    edges_df <- edges_df[order(-abs(edges_df$Diff_Score)), ]
+  } else {
+    edges_df <- NULL
+  }
+  
+  return(list(diff_edges = edges_df))
+}

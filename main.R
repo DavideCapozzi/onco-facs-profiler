@@ -1,104 +1,90 @@
 # main.R
 # ==============================================================================
 # MAIN PIPELINE ORCHESTRATOR
-# Description: Executes steps 01-05 sequentially with Real-Time TEE logging.
+# Description: End-to-end execution of the Immunological Analysis Pipeline.
+#              Supports single-run and multi-scenario campaigns via config.
 # ==============================================================================
 
-# Clean environment
-rm(list = ls())
-graphics.off()
-
-# 1. Setup Logging & Clean Output
-# ------------------------------------------------------------------------------
-library(yaml)
-
-# Disable ANSI colors
-options(crayon.enabled = FALSE)
-
-config_path <- "config/global_params.yml"
-if (!file.exists(config_path)) stop("Config file not found!")
-
-config <- yaml::read_yaml(config_path)
-
-# Define Output Structure
-out_root <- config$output_root
-if (!is.null(config$project_name) && config$project_name != "") {
-  out_root <- paste0(out_root, "_", config$project_name)
-}
-
-if (!dir.exists(out_root)) dir.create(out_root, recursive = TRUE)
-
-# Define Log File
-timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-log_file <- file.path(out_root, paste0("pipeline_log_", timestamp, ".txt"))
-
-# Initialize Log File
-cat(sprintf("=== PIPELINE STARTED: %s ===\n", Sys.time()), file = log_file)
-message(sprintf("[System] Saving full log to: %s", log_file))
-
-# 2. Advanced Logger Function
-# ------------------------------------------------------------------------------
-# Captures messages/warnings and writes them to file
-run_pipeline_step <- function(script_path) {
-  
-  if (!file.exists(script_path)) stop(paste("Script missing:", script_path))
-  
-  # Append separator to log
-  cat(paste0("\n>>> RUNNING: ", basename(script_path), " <<<\n"), 
-      file = log_file, append = TRUE)
-  
-  # Execute with Handlers
-  withCallingHandlers({
-    source(script_path, echo = FALSE)
-  }, 
-  # Handler for Messages (Green text in console)
-  message = function(m) {
-    cat(conditionMessage(m), file = log_file, append = TRUE, sep = "\n")
-  },
-  # Handler for Warnings
-  warning = function(w) {
-    cat(paste0("WARNING: ", conditionMessage(w)), file = log_file, append = TRUE, sep = "\n")
-  })
-}
-
-# 3. Execution Block 
-# ------------------------------------------------------------------------------
-# sink(..., split=TRUE) handles standard prints/cats, sending them to both console and file
-sink(file = log_file, append = TRUE, split = TRUE)
-
-tryCatch({
-  
-  # Step 1: Data Processing & QC
-  run_pipeline_step("src/01_data_processing.R")
-  
-  # Step 2: Visualization
-  run_pipeline_step("src/02_visualization.R")
-  
-  # Step 3: Statistical Analysis
-  run_pipeline_step("src/03_statistical_analysis.R")
-  
-  # Step 4: Network Inference
-  run_pipeline_step("src/04_network_inference.R")
-  
-  # Step 5: Network Topology
-  run_pipeline_step("src/05_network_topology.R")
-  
-  final_msg <- sprintf("\n=== PIPELINE FINISHED SUCCESSFULLY: %s ===", Sys.time())
-  message(final_msg)
-  
-}, error = function(e) {
-  # Error Handling
-  err_msg <- paste("\n[FATAL ERROR] Pipeline stopped unexpectedly.",
-                   "Error Message:", e$message, sep = "\n")
-  
-  # Write to file explicitly because sink might be unstable during error
-  cat(err_msg, file = log_file, append = TRUE)
-  # Print to console (red)
-  stop(err_msg)
-  
-}, finally = {
-  # 4. Cleanup
-  # ------------------------------------------------------------------------------
-  sink() # Turn off stdout diversion
-  options(crayon.enabled = TRUE) 
+# 1. Environment Setup
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(yaml)
+  library(here)
 })
+
+here()
+# Load Modules
+list.files("R", pattern = "\\.R$", full.names = TRUE) %>% walk(source)
+
+# Load Configuration
+config <- load_config("config/global_params.yml")
+message(sprintf("[Main] Project: %s | Output: %s", 
+                config$project_name, config$output_root))
+
+# Create Output Root
+if (!dir.exists(config$output_root)) dir.create(config$output_root, recursive = TRUE)
+
+
+# ==============================================================================
+# STEP 01 & 02: ETL & VISUALIZATION (Core Data Processing)
+# ==============================================================================
+# These steps generate the "Master Dataset" used by all downstream analyses.
+# We execute them as scripts to maintain the file-based checkpointing.
+
+message("\n--- PHASE 1: DATA PROCESSING & VIZ ---")
+source("src/01_data_processing.R")
+source("src/02_visualization.R")
+
+
+# ==============================================================================
+# STEP 03: ANALYTICAL WORKFLOWS (Config-Driven)
+# ==============================================================================
+# Instead of static scripts, we now iterate over the scenarios defined in config.
+# This handles the "Standard" analysis and the "LS Characterization" uniformly.
+
+message("\n--- PHASE 2: STATISTICAL & NETWORK ANALYSIS ---")
+
+# Load the processed data once
+data_file <- file.path(config$output_root, "01_data_processing", "data_processed.rds")
+if (!file.exists(data_file)) stop("CRITICAL: Processed data not found.")
+processed_data <- readRDS(data_file)
+
+# Define where results go
+results_root <- file.path(config$output_root, "results_analysis")
+
+# Check for scenarios in config
+if (is.null(config$analysis_scenarios) || length(config$analysis_scenarios) == 0) {
+  warning("[Main] No 'analysis_scenarios' found in config. Skipping Phase 2.")
+} else {
+  
+  # Iterate and Execute
+  all_results <- list()
+  
+  for (scenario in config$analysis_scenarios) {
+    tryCatch({
+      res <- run_comparative_workflow(
+        data_list = processed_data, 
+        scenario = scenario, 
+        config = config, 
+        output_root = results_root
+      )
+      all_results[[scenario$id]] <- res
+    }, error = function(e) {
+      message(sprintf("!!! [Error] Scenario '%s' failed: %s", scenario$id, e$message))
+    })
+  }
+  
+  # Optional: Global Synthesis (e.g. Venn Diagram of Drivers)
+  # If we have multiple scenarios, we can compare them here.
+  if (length(all_results) > 1) {
+    message("\n[Main] Generating Global Synthesis across scenarios...")
+    # Example: Extract drivers from all scenarios and save a summary table
+    combined_drivers <- map_dfr(all_results, ~ .x$drivers, .id = "Scenario")
+    if (nrow(combined_drivers) > 0) {
+      write.csv(combined_drivers, file.path(results_root, "Global_Drivers_Summary.csv"), row.names = FALSE)
+      message("       -> Saved 'Global_Drivers_Summary.csv'")
+    }
+  }
+}
+
+message("\n=== PIPELINE COMPLETED SUCCESSFULLY ===")
