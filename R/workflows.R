@@ -54,13 +54,22 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
   # Filter Matrix to match Metadata
   sub_mat <- full_mat[sub_meta$Patient_ID, , drop = FALSE]
   
-  # 3. Variance Sanity Check (Remove zero-variance features in this subset)
+  # Check if we have data after filtering
+  if (nrow(sub_mat) == 0) {
+    message("   [Stop] No samples found for this scenario after filtering.")
+    return(NULL)
+  }
+  
+  # 3. Variance Sanity Check (Dynamic Config)
+  # Uses config parameter or defaults to 1e-6 if missing
+  var_thresh <- if(!is.null(config$stats$min_variance)) config$stats$min_variance else 1e-6
+  
   vars <- apply(sub_mat, 2, var, na.rm = TRUE)
-  keep_vars <- vars > 1e-6 & !is.na(vars)
+  keep_vars <- vars > var_thresh & !is.na(vars)
   
   if (sum(!keep_vars) > 0) {
     dropped <- names(vars)[!keep_vars]
-    message(sprintf("   [Prep] Dropping %d features with zero variance in this subset.", length(dropped)))
+    message(sprintf("   [Prep] Dropping %d features with variance < %s in this subset.", length(dropped), as.character(var_thresh)))
     sub_mat <- sub_mat[, keep_vars, drop = FALSE]
   }
   
@@ -87,41 +96,54 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
   message("   [Stats] Running sPLS-DA...")
   spls_drivers <- NULL
   
-  tryCatch({
-    # Config parameters
-    n_comp <- if(!is.null(config$multivariate$n_comp)) config$multivariate$n_comp else 2
-    cv_folds <- if(!is.null(config$multivariate$validation_folds)) config$multivariate$validation_folds else 5
-    n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 10
-    
-    # Adjust folds if sample size is too small
-    min_class_n <- min(table(sub_meta$Analysis_Group))
-    if (cv_folds > min_class_n) cv_folds <- min_class_n
-    
-    spls_res <- run_splsda_model(
-      data_z = sub_mat,          
-      metadata = sub_meta,       
-      group_col = "Analysis_Group",
-      n_comp = n_comp, 
-      folds = cv_folds,
-      n_repeat = n_rep 
-    )
-    
-    spls_drivers <- extract_plsda_loadings(spls_res)
-    
-    # Plotting is handled here as it generates a PDF file
-    if (nrow(spls_drivers) > 0) {
-      viz_report_plsda(
-        pls_res = spls_res,
-        drivers_df = spls_drivers,
-        metadata_viz = sub_meta,
-        colors_viz = get_palette(config),
-        out_path = file.path(out_dir, "Plot_sPLSDA.pdf"),
-        group_col = "Analysis_Group"
-      )
-    }
-  }, error = function(e) {
-    message(sprintf("      [Fail] sPLS-DA failed: %s", e$message))
-  })
+  # Pre-check for group levels to avoid "Y should be a factor" error
+  n_levels_y <- length(unique(as.character(sub_meta$Analysis_Group)))
+  
+  if (n_levels_y < 2) {
+    message(sprintf("      [Skip] sPLS-DA skipped: Only %d group(s) present (needs 2).", n_levels_y))
+  } else {
+    tryCatch({
+      # Config parameters
+      n_comp <- if(!is.null(config$multivariate$n_comp)) config$multivariate$n_comp else 2
+      cv_folds <- if(!is.null(config$multivariate$validation_folds)) config$multivariate$validation_folds else 5
+      n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 10
+      
+      # Adjust folds if sample size is too small
+      min_class_n <- min(table(sub_meta$Analysis_Group))
+      # Ensure folds is at least 2 and not larger than N
+      if (cv_folds > min_class_n) cv_folds <- max(2, min_class_n)
+      
+      # Double check if CV is possible (need at least 2 samples per class for LOO/Mfold)
+      if (min_class_n < 2) {
+        message("      [Skip] sPLS-DA skipped: Class size too small for CV (<2).")
+      } else {
+        spls_res <- run_splsda_model(
+          data_z = sub_mat,          
+          metadata = sub_meta,       
+          group_col = "Analysis_Group",
+          n_comp = n_comp, 
+          folds = cv_folds,
+          n_repeat = n_rep 
+        )
+        
+        spls_drivers <- extract_plsda_loadings(spls_res)
+        
+        # Plotting is handled here as it generates a PDF file
+        if (nrow(spls_drivers) > 0) {
+          viz_report_plsda(
+            pls_res = spls_res,
+            drivers_df = spls_drivers,
+            metadata_viz = sub_meta,
+            colors_viz = get_palette(config),
+            out_path = file.path(out_dir, "Plot_sPLSDA.pdf"),
+            group_col = "Analysis_Group"
+          )
+        }
+      }
+    }, error = function(e) {
+      message(sprintf("      [Fail] sPLS-DA failed: %s", e$message))
+    })
+  }
   
   # 6. Network Inference (Robust Differential)
   message("   [Network] Inferring Differential Networks (Robust PCOR)...")
@@ -131,9 +153,14 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
     mat_case <- sub_mat[sub_meta$Analysis_Group == scenario$case_label, , drop=FALSE]
     mat_ctrl <- sub_mat[sub_meta$Analysis_Group == scenario$control_label, , drop=FALSE]
     
-    # Check minimum sample size for network inference
-    if(nrow(mat_case) < 5 || nrow(mat_ctrl) < 5) {
-      message("      [Skip] Network inference skipped (N < 5 in one group).")
+    # --- DYNAMIC CONFIG CHECK ---
+    # Retrieve minimum N from config or default to 5
+    net_min_n <- if(!is.null(config$stats$min_network_n)) config$stats$min_network_n else 5
+    
+    # Check minimum sample size for network inference using dynamic threshold
+    if(nrow(mat_case) < net_min_n || nrow(mat_ctrl) < net_min_n) {
+      message(sprintf("      [Skip] Network inference skipped (N < %d in one group: Case=%d, Ctrl=%d).", 
+                      net_min_n, nrow(mat_case), nrow(mat_ctrl)))
     } else {
       
       # Configuration parameters extraction
@@ -152,7 +179,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         seed = seed_cfg,
         n_cores = n_cores_cfg,
         fdr_thresh = fdr_cfg,
-        stability_thresh = 0.8 # Default stability requirement
+        stability_thresh = 0.8 
       )
     }
   }, error = function(e) {

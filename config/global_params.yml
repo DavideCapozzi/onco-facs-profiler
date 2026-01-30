@@ -99,6 +99,8 @@ multivariate:
 stats:
   seed: 2025
   min_sample_size: 4
+  min_network_n: 3
+  min_variance: 0.000001
   n_boot: 1000        
   n_perm: 2000        
   alpha: 0.05         
