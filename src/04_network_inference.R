@@ -123,8 +123,8 @@ saveWorkbook(wb_diff, file.path(out_dir, "Differential_Stats.xlsx"), overwrite =
 final_obj <- list(
   # Using raw PCOR weights. Adjacency based on arbitrary weak threshold for viz
   # since we focused on differential testing here.
-  ctrl_network = list(adj = (abs(diff_res$networks$ctrl) > 0.1)*1, weights = diff_res$networks$ctrl),
-  case_network = list(adj = (abs(diff_res$networks$case) > 0.1)*1, weights = diff_res$networks$case),
+  ctrl_network = list(adj = diff_res$stability$ctrl, weights = diff_res$networks$ctrl),
+  case_network = list(adj = diff_res$stability$case, weights = diff_res$networks$case),
   diff_table = diff_res$edges_table, 
   config = config
 )

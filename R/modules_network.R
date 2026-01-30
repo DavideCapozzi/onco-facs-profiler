@@ -163,6 +163,9 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   agg_ctrl <- aggregate_boot_results(boots_ctrl, alpha = 0.05)
   agg_case <- aggregate_boot_results(boots_case, alpha = 0.05)
   
+  check_boot_yield(agg_ctrl, n_boot, "Control")
+  check_boot_yield(agg_case, n_boot, "Case")
+  
   # Maschera di stabilità: Un arco è "degno di test" se è stabile in ALMENO uno dei due gruppi
   # stability_thresh (es. 0.8) è implicito in aggregate_boot_results se basato su CI, 
   # oppure possiamo usare agg_ctrl$stability > stability_thresh.
@@ -248,7 +251,8 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   
   return(list(
     edges_table = res_df,
-    networks = list(ctrl = obs_ctrl, case = obs_case)
+    networks = list(ctrl = obs_ctrl, case = obs_case),
+    stability = list(ctrl = agg_ctrl$adj, case = agg_case$adj)
   ))
 }
 
