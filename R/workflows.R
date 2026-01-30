@@ -1,7 +1,8 @@
 # R/workflows.R
 # ==============================================================================
 # WORKFLOW ORCHESTRATION
-# Description: High-level functions to execute analysis pipelines based on config.
+# Description: Orchestrates analysis for specific scenarios defined in config.
+#              Connects data preparation with statistical modules.
 # ==============================================================================
 
 source("R/modules_hypothesis.R")
@@ -11,27 +12,28 @@ source("R/modules_viz.R")
 
 #' @title Run Comparative Analysis Workflow
 #' @description 
-#' Executes the full statistical pipeline for a specific contrast defined in the config.
-#' Handles subsetting, zero-variance filtering, PERMANOVA, sPLS-DA, and Network Inference.
+#' Executes the full statistical pipeline for a specific contrast.
+#' 1. Subsets data based on scenario groups.
+#' 2. Runs PERMANOVA (Global multivariate difference).
+#' 3. Runs sPLS-DA (Driver identification).
+#' 4. Runs Robust Differential Network Inference (Bootstrap + Permutation).
 #' 
 #' @param data_list The processed data object (output of step 01).
-#' @param scenario A list containing the specific scenario config.
+#' @param scenario A list containing the specific scenario config (cases/controls).
 #' @param config The global configuration object.
-#' @param output_root The root directory where scenario-specific subfolders will be created.
-#' @return A list containing the results (drivers, stats, networks).
+#' @param output_root Directory for saving plot-based outputs (PDFs).
+#' @return A list containing results: $id, $permanova, $drivers, $network.
 run_comparative_workflow <- function(data_list, scenario, config, output_root) {
   
-  # 1. Setup Output Directory
+  # 1. Setup Output Directory for Plots
   out_dir <- file.path(output_root, scenario$id)
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
   
   message(sprintf("\n[Workflow] Starting Scenario: %s", scenario$id))
-  message(sprintf("           Comparison: %s (%s) vs %s (%s)", 
-                  scenario$case_label, paste(scenario$case_groups, collapse="+"),
-                  scenario$control_label, paste(scenario$control_groups, collapse="+")))
   
   # 2. Data Preparation & Subsetting
   full_meta <- data_list$metadata
+  # Use hybrid_data_z for statistics (Z-scored data)
   full_mat  <- data_list$hybrid_data_z %>% 
     dplyr::select(dplyr::all_of(data_list$hybrid_markers)) %>% 
     as.matrix()
@@ -39,116 +41,129 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
   
   target_groups <- c(scenario$case_groups, scenario$control_groups)
   
-  # Filter Metadata and Create Analysis_Group
+  # Filter Metadata and Create Analysis_Group Factor
+  # Levels are set so Control is reference (first level)
   sub_meta <- full_meta %>% 
     dplyr::filter(Group %in% target_groups) %>%
     dplyr::mutate(Analysis_Group = ifelse(Group %in% scenario$case_groups, 
                                           scenario$case_label, 
                                           scenario$control_label)) %>%
-    dplyr::mutate(Analysis_Group = factor(Analysis_Group, levels = c(scenario$control_label, scenario$case_label)))
+    dplyr::mutate(Analysis_Group = factor(Analysis_Group, 
+                                          levels = c(scenario$control_label, scenario$case_label)))
   
   # Filter Matrix to match Metadata
   sub_mat <- full_mat[sub_meta$Patient_ID, , drop = FALSE]
   
-  # 3. Variance Sanity Check
+  # 3. Variance Sanity Check (Remove zero-variance features in this subset)
   vars <- apply(sub_mat, 2, var, na.rm = TRUE)
   keep_vars <- vars > 1e-6 & !is.na(vars)
   
   if (sum(!keep_vars) > 0) {
     dropped <- names(vars)[!keep_vars]
-    message(sprintf("   [Prep] Dropping %d features with zero variance in this subset: %s", 
-                    length(dropped), paste(dropped, collapse=", ")))
+    message(sprintf("   [Prep] Dropping %d features with zero variance in this subset.", length(dropped)))
     sub_mat <- sub_mat[, keep_vars, drop = FALSE]
   }
   
-  # 4. Construct Clean Input for Modules (Dataframe version for PERMANOVA)
-  sub_data_input <- cbind(sub_meta, as.data.frame(sub_mat))
-  
-  # Robustly identify metadata columns to exclude
-  meta_cols_to_exclude <- colnames(sub_meta)
-  
-  # 5. Statistical Tests (PERMANOVA)
+  # 4. Statistical Tests (PERMANOVA)
   message("   [Stats] Running PERMANOVA...")
+  perm_res <- NULL
   tryCatch({
-    res_perm <- test_coda_permanova(
+    # Prepare input dataframe
+    sub_data_input <- cbind(sub_meta, as.data.frame(sub_mat))
+    meta_cols_to_exclude <- colnames(sub_meta)
+    
+    perm_obj <- test_coda_permanova(
       sub_data_input, 
       group_col = "Analysis_Group", 
       metadata_cols = meta_cols_to_exclude, 
-      n_perm = 999
+      n_perm = if(!is.null(config$stats$n_perm)) config$stats$n_perm else 999
     )
-    write.csv(as.data.frame(res_perm), file.path(out_dir, "PERMANOVA_Result.csv"))
+    perm_res <- as.data.frame(perm_obj)
   }, error = function(e) {
     message(sprintf("      [Fail] PERMANOVA failed: %s", e$message))
   })
   
-  # 6. Multivariate Analysis (sPLS-DA)
+  # 5. Multivariate Analysis (sPLS-DA)
   message("   [Stats] Running sPLS-DA...")
-  
-  local_colors <- get_palette(config)
   spls_drivers <- NULL
   
   tryCatch({
-    # CORRECTED CALL: Pass data_z (matrix) and metadata separately
+    # Config parameters
+    n_comp <- if(!is.null(config$multivariate$n_comp)) config$multivariate$n_comp else 2
+    cv_folds <- if(!is.null(config$multivariate$validation_folds)) config$multivariate$validation_folds else 5
+    n_rep <- if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 10
+    
+    # Adjust folds if sample size is too small
+    min_class_n <- min(table(sub_meta$Analysis_Group))
+    if (cv_folds > min_class_n) cv_folds <- min_class_n
+    
     spls_res <- run_splsda_model(
-      data_z = sub_mat,          # Numeric Matrix ONLY
-      metadata = sub_meta,       # Metadata DataFrame
+      data_z = sub_mat,          
+      metadata = sub_meta,       
       group_col = "Analysis_Group",
-      n_comp = 2, 
-      folds = 5,
-      n_repeat = 10 # Reduced for speed, increase for final run
+      n_comp = n_comp, 
+      folds = cv_folds,
+      n_repeat = n_rep 
     )
     
-    # CORRECTED EXTRACTION: Must use extract_plsda_loadings
     spls_drivers <- extract_plsda_loadings(spls_res)
     
+    # Plotting is handled here as it generates a PDF file
     if (nrow(spls_drivers) > 0) {
-      write.csv(spls_drivers, file.path(out_dir, "sPLSDA_Drivers.csv"), row.names = FALSE)
-      
-      # Visualization
       viz_report_plsda(
         pls_res = spls_res,
         drivers_df = spls_drivers,
         metadata_viz = sub_meta,
-        colors_viz = local_colors,
+        colors_viz = get_palette(config),
         out_path = file.path(out_dir, "Plot_sPLSDA.pdf"),
         group_col = "Analysis_Group"
       )
-    } else {
-      message("      [Info] No significant drivers found.")
     }
   }, error = function(e) {
     message(sprintf("      [Fail] sPLS-DA failed: %s", e$message))
   })
   
-  # 7. Network Inference (Differential)
-  message("   [Network] Inferring Differential Networks...")
-  
+  # 6. Network Inference (Robust Differential)
+  message("   [Network] Inferring Differential Networks (Robust PCOR)...")
   net_res <- NULL
+  
   tryCatch({
-    # Use clean numeric matrices
     mat_case <- sub_mat[sub_meta$Analysis_Group == scenario$case_label, , drop=FALSE]
     mat_ctrl <- sub_mat[sub_meta$Analysis_Group == scenario$control_label, , drop=FALSE]
     
-    n_boot <- if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100
-    
-    # Now calls the function we added to modules_network.R
-    net_res <- infer_differential_network(
-      mat_ctrl = mat_ctrl,
-      mat_case = mat_case,
-      method = "spearman",
-      n_bootstrap = n_boot
-    )
-    
-    if (!is.null(net_res$diff_edges)) {
-      write.csv(net_res$diff_edges, file.path(out_dir, "Differential_Network_Edges.csv"), row.names = FALSE)
+    # Check minimum sample size for network inference
+    if(nrow(mat_case) < 5 || nrow(mat_ctrl) < 5) {
+      message("      [Skip] Network inference skipped (N < 5 in one group).")
+    } else {
+      
+      # Configuration parameters extraction
+      n_boot_cfg <- if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100
+      n_perm_cfg <- if(!is.null(config$stats$n_perm)) config$stats$n_perm else 1000
+      fdr_cfg <- if(!is.null(config$stats$fdr_threshold)) config$stats$fdr_threshold else 0.1
+      seed_cfg <- if(!is.null(config$stats$seed)) config$stats$seed else 123
+      n_cores_cfg <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1
+      
+      # Calling the Robust Module (Bootstrap + Permutation)
+      net_res <- run_differential_network(
+        mat_ctrl = mat_ctrl,
+        mat_case = mat_case,
+        n_boot = n_boot_cfg,
+        n_perm = n_perm_cfg,
+        seed = seed_cfg,
+        n_cores = n_cores_cfg,
+        fdr_thresh = fdr_cfg,
+        stability_thresh = 0.8 # Default stability requirement
+      )
     }
   }, error = function(e) {
     message(sprintf("      [Fail] Network Inference failed: %s", e$message))
   })
   
+  # Return structured list for Main Orchestrator
   return(list(
     id = scenario$id,
+    permanova = perm_res,
     drivers = spls_drivers,
-    network = net_res
+    network = net_res # Contains $edges_table and $networks
   ))
 }
