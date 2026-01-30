@@ -105,6 +105,153 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
   return(list(adj = adj_mat, weights = mean_mat, stability = stab_mat, n_boot_valid = n_boots))
 }
 
+#' @title Run Robust Differential Network Analysis (Bootstrap + Permutation)
+#' @description 
+#' Combines Bootstrap (for edge stability) and Permutation (for differential significance).
+#' This reproduces the rigorous logic: Filter unstable edges -> Test differences on stable ones.
+#' 
+#' @param mat_ctrl Reference matrix.
+#' @param mat_case Test matrix.
+#' @param n_boot Number of bootstrap iterations for stability (default 100).
+#' @param n_perm Number of permutations for significance (default 1000).
+#' @param seed Random seed.
+#' @param n_cores Number of cores.
+#' @param fdr_thresh FDR threshold.
+#' @param stability_thresh Frequency threshold to keep an edge (e.g., 0.8 = 80%).
+#' @return List with edge table and network objects.
+run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
+                                     seed = 123, n_cores = 1, fdr_thresh = 0.1, 
+                                     stability_thresh = 0.8) {
+  
+  requireNamespace("parallel", quietly = TRUE)
+  requireNamespace("doParallel", quietly = TRUE)
+  requireNamespace("foreach", quietly = TRUE)
+  requireNamespace("corpcor", quietly = TRUE)
+  
+  message(sprintf("      [DiffNet] Start: Boot=%d, Perm=%d, Cores=%d", n_boot, n_perm, n_cores))
+  
+  # Setup Cluster
+  cl <- parallel::makeCluster(n_cores)
+  doParallel::registerDoParallel(cl)
+  parallel::clusterEvalQ(cl, { library(corpcor) })
+  # Esporta le funzioni necessarie ai worker
+  parallel::clusterExport(cl, varlist = c("infer_network_pcor", "boot_worker_pcor"), envir = environment())
+  parallel::clusterSetRNGStream(cl, seed)
+  
+  # --- STEP 1: BOOTSTRAP (Stability) ---
+  message("      [DiffNet] 1/3 Running Bootstrap Stability...")
+  
+  # Helper interno per eseguire il bootstrap su una matrice
+  run_boot_internal <- function(mat, n_b) {
+    n_samp <- nrow(mat)
+    res_list <- foreach::foreach(i = 1:n_b, .packages = "corpcor") %dopar% {
+      boot_worker_pcor(mat, n_samp, lambda_val = NULL)
+    }
+    # Rimuovi NULL (iterazioni fallite)
+    Filter(Negate(is.null), res_list)
+  }
+  
+  boots_ctrl <- run_boot_internal(mat_ctrl, n_boot)
+  boots_case <- run_boot_internal(mat_case, n_boot)
+  
+  # Calcola stabilità (Frequenza di apparizione dell'arco non nullo o consistente nel segno)
+  # Qui usiamo la logica: Quanto spesso l'arco è non-zero? 
+  # Poiché pcor.shrink dà sempre valori != 0, usiamo un intervallo di confidenza implicito
+  # Oppure, per replicare la tua logica precedente: usiamo aggregate_boot_results
+  
+  # Nota: aggregate_boot_results è definita in questo stesso file (vedi codice precedente)
+  agg_ctrl <- aggregate_boot_results(boots_ctrl, alpha = 0.05)
+  agg_case <- aggregate_boot_results(boots_case, alpha = 0.05)
+  
+  # Maschera di stabilità: Un arco è "degno di test" se è stabile in ALMENO uno dei due gruppi
+  # stability_thresh (es. 0.8) è implicito in aggregate_boot_results se basato su CI, 
+  # oppure possiamo usare agg_ctrl$stability > stability_thresh.
+  # Usiamo la logica CI di aggregate_boot_results (adj == 1 significa CI non attraversa zero)
+  stable_mask <- (agg_ctrl$adj == 1 | agg_case$adj == 1)
+  
+  n_stable_edges <- sum(stable_mask[upper.tri(stable_mask)])
+  message(sprintf("      [DiffNet] Found %d stable edges (union of groups).", n_stable_edges))
+  
+  if (n_stable_edges == 0) {
+    parallel::stopCluster(cl)
+    return(list(edges_table = data.frame(), networks = list()))
+  }
+  
+  # --- STEP 2: OBSERVED DIFFERENCE ---
+  obs_ctrl <- infer_network_pcor(mat_ctrl, fixed_lambda = NULL)
+  obs_case <- infer_network_pcor(mat_case, fixed_lambda = NULL)
+  obs_diff <- abs(obs_ctrl - obs_case)
+  
+  # --- STEP 3: PERMUTATION TEST (Only on Stable Edges logic) ---
+  message("      [DiffNet] 2/3 Running Permutation Test...")
+  
+  pool_mat <- rbind(mat_ctrl, mat_case)
+  n1 <- nrow(mat_ctrl)
+  n2 <- nrow(mat_case)
+  n_total <- n1 + n2
+  
+  null_diffs <- foreach::foreach(i = 1:n_perm, .packages = "corpcor") %dopar% {
+    shuffled_idx <- sample(1:n_total)
+    p1 <- pool_mat[shuffled_idx[1:n1], ]
+    p2 <- pool_mat[shuffled_idx[(n1 + 1):n_total], ]
+    
+    r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
+    r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
+    abs(r1 - r2)
+  }
+  
+  parallel::stopCluster(cl)
+  foreach::registerDoSEQ()
+  
+  # --- STEP 4: P-VALUE & FDR ---
+  message("      [DiffNet] 3/3 calculating statistics...")
+  
+  nodes <- colnames(mat_ctrl)
+  edges_idx <- which(upper.tri(stable_mask) & stable_mask, arr.ind = TRUE)
+  
+  results_list <- list()
+  denom <- n_perm + 1
+  
+  if(nrow(edges_idx) > 0) {
+    for(k in 1:nrow(edges_idx)) {
+      i <- edges_idx[k,1]
+      j <- edges_idx[k,2]
+      
+      obs_val <- obs_diff[i,j]
+      null_vals <- sapply(null_diffs, function(m) m[i, j])
+      
+      p_val <- (sum(null_vals >= obs_val) + 1) / denom
+      
+      results_list[[k]] <- data.frame(
+        Node1 = nodes[i],
+        Node2 = nodes[j],
+        Weight_Ctrl = obs_ctrl[i,j],
+        Weight_Case = obs_case[i,j],
+        Is_Stable_Ctrl = agg_ctrl$adj[i,j] == 1,
+        Is_Stable_Case = agg_case$adj[i,j] == 1,
+        Diff_Score = obs_val,
+        P_Value = p_val,
+        stringsAsFactors = FALSE
+      )
+    }
+    
+    res_df <- do.call(rbind, results_list)
+    
+    # FDR Correction (Corretto solo sul numero di archi stabili!)
+    res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
+    res_df$Significant <- res_df$FDR < fdr_thresh
+    
+    res_df <- res_df[order(res_df$P_Value), ]
+  } else {
+    res_df <- data.frame()
+  }
+  
+  return(list(
+    edges_table = res_df,
+    networks = list(ctrl = obs_ctrl, case = obs_case)
+  ))
+}
+
 #' @title Calculate Topology Metrics
 get_topology_metrics <- function(adj_mat, weight_mat) {
   requireNamespace("igraph", quietly = TRUE)
@@ -138,73 +285,4 @@ export_cytoscape_edges <- function(adj_mat, weight_mat) {
     ) %>%
     dplyr::rename(Source = from, Target = to) %>%
     ungroup()
-}
-
-#' @title Infer Differential Network
-#' @description 
-#' Calculates the difference in correlation structure between two conditions.
-#' Returns a table of edges that change significantly between Case and Control.
-#' 
-#' @param mat_ctrl Numeric matrix for Control group.
-#' @param mat_case Numeric matrix for Case group.
-#' @param method Correlation method ("spearman" or "pearson").
-#' @param n_bootstrap Number of bootstraps (placeholder for future implementation).
-#' @return A list containing the edge table.
-infer_differential_network <- function(mat_ctrl, mat_case, method = "spearman", n_bootstrap = 100) {
-  
-  # Safety Checks
-  if (ncol(mat_ctrl) != ncol(mat_case)) stop("Matrices must have same columns.")
-  
-  # Compute Correlations
-  # Use use="pairwise.complete.obs" to handle potential NAs robustly
-  cor_ctrl <- cor(mat_ctrl, method = method, use = "pairwise.complete.obs")
-  cor_case <- cor(mat_case, method = method, use = "pairwise.complete.obs")
-  
-  # Replace NAs with 0 (if variance was 0 for some features)
-  cor_ctrl[is.na(cor_ctrl)] <- 0
-  cor_case[is.na(cor_case)] <- 0
-  
-  # Calculate Difference matrix
-  diff_mat <- cor_case - cor_ctrl
-  
-  # Flatten to Edge List (Upper triangle only)
-  edges <- list()
-  markers <- colnames(mat_ctrl)
-  
-  count <- 1
-  for (i in 1:(length(markers)-1)) {
-    for (j in (i+1):length(markers)) {
-      m1 <- markers[i]
-      m2 <- markers[j]
-      
-      w_ctrl <- cor_ctrl[i, j]
-      w_case <- cor_case[i, j]
-      delta  <- diff_mat[i, j]
-      
-      # Filter noise: Keep edge only if correlation is strong in at least one condition
-      # OR if the shift is massive (> 0.4)
-      if (abs(w_ctrl) > 0.3 || abs(w_case) > 0.3 || abs(delta) > 0.4) {
-        edges[[count]] <- data.frame(
-          Node1 = m1,
-          Node2 = m2,
-          Weight_Ctrl = round(w_ctrl, 3),
-          Weight_Case = round(w_case, 3),
-          Diff_Score = round(delta, 3),
-          Type = ifelse(delta > 0, "Strengthened", "Weakened"),
-          stringsAsFactors = FALSE
-        )
-        count <- count + 1
-      }
-    }
-  }
-  
-  if (length(edges) > 0) {
-    edges_df <- do.call(rbind, edges)
-    # Sort by absolute difference
-    edges_df <- edges_df[order(-abs(edges_df$Diff_Score)), ]
-  } else {
-    edges_df <- NULL
-  }
-  
-  return(list(diff_edges = edges_df))
 }
