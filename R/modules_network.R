@@ -154,22 +154,14 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   boots_ctrl <- run_boot_internal(mat_ctrl, n_boot)
   boots_case <- run_boot_internal(mat_case, n_boot)
   
-  # Calcola stabilità (Frequenza di apparizione dell'arco non nullo o consistente nel segno)
-  # Qui usiamo la logica: Quanto spesso l'arco è non-zero? 
-  # Poiché pcor.shrink dà sempre valori != 0, usiamo un intervallo di confidenza implicito
-  # Oppure, per replicare la tua logica precedente: usiamo aggregate_boot_results
-  
-  # Nota: aggregate_boot_results è definita in questo stesso file (vedi codice precedente)
+  # Compute edge stability
   agg_ctrl <- aggregate_boot_results(boots_ctrl, alpha = 0.05)
   agg_case <- aggregate_boot_results(boots_case, alpha = 0.05)
   
   check_boot_yield(agg_ctrl, n_boot, "Control")
   check_boot_yield(agg_case, n_boot, "Case")
   
-  # Maschera di stabilità: Un arco è "degno di test" se è stabile in ALMENO uno dei due gruppi
-  # stability_thresh (es. 0.8) è implicito in aggregate_boot_results se basato su CI, 
-  # oppure possiamo usare agg_ctrl$stability > stability_thresh.
-  # Usiamo la logica CI di aggregate_boot_results (adj == 1 significa CI non attraversa zero)
+  # Stability mask: Edge is counted for test correction if its stable in at least one group
   stable_mask <- (agg_ctrl$adj == 1 | agg_case$adj == 1)
   
   n_stable_edges <- sum(stable_mask[upper.tri(stable_mask)])
@@ -240,7 +232,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     
     res_df <- do.call(rbind, results_list)
     
-    # FDR Correction (Corretto solo sul numero di archi stabili!)
+    # FDR Correction (Only on stable edges)
     res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
     res_df$Significant <- res_df$FDR < fdr_thresh
     
