@@ -93,54 +93,107 @@ max_val <- max(mat_raw, na.rm = TRUE)
 
 if (max_val <= 1.05) { # Tolerance slightly above 1.0
   warning(sprintf(
-    "\n[CAUTION] Data max value is %.2f. You stated input is PERCENTAGES (0-100).\nIf this is actually Proportions (0-1), the pipeline will divide by 100 again, causing errors.\nPlease check your raw input file.", 
+    "\n[CAUTION] Data max value is %.2f. Expected input is PERCENTAGES (0-100).\nIf this is actually Proportions (0-1), the pipeline will divide by 100 again, causing errors.\nPlease check your raw input file.", 
     max_val
   ))
 } else {
   message(sprintf("[Check] Data range confirmed compatible with Percentage mode (Max=%.2f).", max_val))
 }
 
-# 3. Geometric-Aware Quality Control
+# 3. Geometric-Aware Quality Control (Split Strategy)
 # ------------------------------------------------------------------------------
-message("[QC] Generating geometric proxy for robust outlier detection...")
+message("[QC] Running Split QC Strategy...")
 
-# A. Create Proxy Matrix (Fast Mode)
-# Uses `perform_hybrid_transformation` which correctly handles percentages
-# and uses robust epsilon replacement for QC purposes.
-proxy_results <- perform_hybrid_transformation(mat_raw, config, mode = "fast")
-mat_qc_proxy  <- proxy_results$hybrid_data_z
+# --- STEP A: Basic QC (Missingness & Zero Variance on RAW DATA) ---
+# Temporarily disable outlier detection to focus strictly on cleaning NAs/Zeros first.
+# This prevents epsilon-imputation from masking high-missingness samples.
+qc_config_basic <- config$qc
+qc_config_basic$remove_outliers <- FALSE
 
-# B. Run QC on the Proxy Matrix
-# This step identifies rows/cols to drop.
-qc_result_proxy <- run_qc_pipeline(
-  mat_raw = mat_qc_proxy, 
+message("   [QC-A] Filtering Missingness and Zero Variance on RAW data...")
+qc_result <- run_qc_pipeline(
+  mat_raw = mat_raw, 
   metadata = metadata_raw, 
-  qc_config = config$qc, 
+  qc_config = qc_config_basic, 
   stratification_col = config$metadata$subgroup_col,
-  dropped_markers_apriori = data.frame(), # If tracked previously, pass it here
+  dropped_markers_apriori = data.frame(),
   dropped_samples_apriori = dropped_samples_apriori
 )
 
-# C. Apply Filters to ORIGINAL Raw Data (Synchronization)
-# this step ensures that `mat_raw` is clean before proceeding.
-valid_patients <- rownames(qc_result_proxy$data)
-valid_markers  <- colnames(qc_result_proxy$data)
+# Extract cleaned datasets from Step A
+mat_clean_basic  <- qc_result$data
+meta_clean_basic <- qc_result$metadata
 
-dropped_pats <- setdiff(rownames(mat_raw), valid_patients)
-dropped_mks  <- setdiff(colnames(mat_raw), valid_markers)
+# --- STEP B: Geometric Outlier Detection (on PROXY DATA) ---
+# Now that NAs are handled, we generate the proxy for multivariate checks.
+if (config$qc$remove_outliers) {
+  message("   [QC-B] Generating geometric proxy for Outlier Detection...")
+  
+  # 1. Generate Proxy (Fast Mode) on CLEAN data
+  proxy_results <- perform_hybrid_transformation(mat_clean_basic, config, mode = "fast")
+  mat_proxy <- proxy_results$hybrid_data_z
+  
+  # 2. Detect Outliers using the Proxy
+  message("   [QC-B] Detecting multivariate outliers (PCA-based)...")
+  
+  # Determine correct grouping column
+  group_col <- if(config$metadata$subgroup_col %in% colnames(meta_clean_basic)) config$metadata$subgroup_col else "Group"
+  
+  is_outlier <- detect_pca_outliers(
+    mat = mat_proxy, 
+    groups = meta_clean_basic[[group_col]], 
+    conf_level = config$qc$outlier_conf_level
+  )
+  
+  # 3. Apply Outlier Filter & Update Report
+  if (any(is_outlier)) {
+    out_pids <- rownames(mat_clean_basic)[is_outlier]
+    message(sprintf("   [QC-B] Dropping %d multivariate outliers.", length(out_pids)))
+    
+    # Capture info for report
+    group_info <- as.character(meta_clean_basic[[group_col]][is_outlier])
+    
+    # Calculate NA % for these outliers (on the basic clean matrix for transparency)
+    na_pcts <- rowMeans(is.na(mat_clean_basic[is_outlier, , drop=FALSE])) * 100
+    
+    # Append to existing report details
+    new_drops <- data.frame(
+      Patient_ID = out_pids,
+      NA_Percent = round(na_pcts, 2),
+      Reason = "Outlier",
+      Original_Source = group_info,
+      stringsAsFactors = FALSE
+    )
+    
+    qc_result$report$dropped_rows_detail <- rbind(qc_result$report$dropped_rows_detail, new_drops)
+    qc_result$report$n_row_dropped <- nrow(qc_result$report$dropped_rows_detail)
+    
+    # Apply removal
+    mat_clean_basic  <- mat_clean_basic[!is_outlier, , drop = FALSE]
+    meta_clean_basic <- meta_clean_basic[!is_outlier, , drop = FALSE]
+    
+    # Update Final Dimensions in Report
+    qc_result$report$n_row_final <- nrow(mat_clean_basic)
+    
+    # Recalculate Final Breakdown
+    if (!is.null(qc_result$report$breakdown_final)) {
+      qc_result$report$breakdown_final <- table(meta_clean_basic[[config$metadata$subgroup_col]])
+    }
+  }
+}
 
-if(length(dropped_pats) > 0) message(sprintf("[QC] Removed %d patients (outlier/missingness).", length(dropped_pats)))
-if(length(dropped_mks) > 0)  message(sprintf("[QC] Removed %d markers (low variance/missingness).", length(dropped_mks)))
+# --- STEP C: Synchronization ---
+# Sync main objects with the final result of the Split QC
+mat_raw <- mat_clean_basic
+metadata_raw <- meta_clean_basic
+raw_data <- raw_data %>% filter(Patient_ID %in% rownames(mat_raw))
 
-# Update Raw Objects
-mat_raw <- mat_raw[valid_patients, valid_markers, drop = FALSE]
-raw_data <- raw_data %>% filter(Patient_ID %in% valid_patients)
-metadata_raw <- metadata_raw[match(valid_patients, metadata_raw$Patient_ID), , drop = FALSE]
+message(sprintf("[QC] Final Dimensions: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
 # Save QC Report
 out_dir <- file.path(config$output_root, "01_data_processing")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-save_qc_report(qc_result_proxy$report, file.path(out_dir, "QC_Filtering_Report.xlsx"))
+save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"))
 
 # 4. Final Hybrid Transformation (Complete Mode)
 # ------------------------------------------------------------------------------
