@@ -200,6 +200,25 @@ save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"))
 # Now running on strictly filtered data.
 # Mode="complete" enables: CZM (zeros), BPCA (imputation), and CLR/ILR.
 
+na_rates <- rowMeans(is.na(mat_raw))
+impute_indices <- which(na_rates > 0)
+
+if (length(impute_indices) > 0) {
+  # Sort indices by missingness (descending) to highlight heavily imputed samples first
+  impute_indices <- impute_indices[order(na_rates[impute_indices], decreasing = TRUE)]
+  
+  # Format string: "PatientID (XX%)"
+  log_entries <- sprintf("%s (%.0f%%)", 
+                         names(impute_indices), 
+                         na_rates[impute_indices] * 100)
+  
+  message(sprintf("\n[Impute] The following %d samples contain missing values and will undergo BPCA Imputation:", length(log_entries)))
+  message(paste(log_entries, collapse = ", "))
+  message("") # Add spacing for readability
+} else {
+  message("\n[Impute] No missing values detected in the filtered dataset. BPCA step will be skipped internally.")
+}
+
 message("[CoDa] Running Final Hybrid Transformation (Complete Mode) on clean data...")
 transform_results <- perform_hybrid_transformation(mat_raw, config, mode = "complete")
 

@@ -106,7 +106,7 @@ viz:
 
 # --- Quality Control ---
 qc:
-  max_na_row_pct: 0.55   
+  max_na_row_pct: 0.45   
   max_na_col_pct: 0.20  
   remove_outliers: true
   outlier_conf_level: 0.99
