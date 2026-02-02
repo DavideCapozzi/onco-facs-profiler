@@ -79,10 +79,11 @@ load_raw_data <- function(config) {
 }
 
 #' @title Save Quality Control Report to Excel
-#' @description Generates a multi-sheet Excel report with filtering statistics and group breakdowns.
-#' @param qc_list A list containing summary stats and dataframes of dropped items.
+#' @description Generates a multi-sheet Excel report with filtering statistics, group breakdowns, and categorized marker lists.
+#' @param qc_list A list containing summary stats, dataframes of dropped items, and group mappings.
 #' @param out_path Path to save the .xlsx file.
-save_qc_report <- function(qc_list, out_path) {
+#' @param config Configuration object (optional) containing 'qc_reporting' settings for marker categorization.
+save_qc_report <- function(qc_list, out_path, config = NULL) {
   
   wb <- createWorkbook()
   
@@ -148,16 +149,57 @@ save_qc_report <- function(qc_list, out_path) {
     df_samples <- fill_row_counts(df_samples, "Final Samples", qc_list$breakdown_final)
   }
   
-  # 5. Write to Sheet (Samples Section)
+  # 5. Calculate Totals per Macro-Group and add a "Total (by Group)" row
+  if (!is.null(qc_list$group_mapping) && !is.null(qc_list$breakdown_final)) {
+    
+    # Create the new row structure
+    total_row <- df_samples[1, ]
+    total_row[,] <- NA
+    total_row$Metric <- "Total (by Group)"
+    total_row$Total <- df_samples[df_samples$Metric == "Final Samples", "Total"] # Grand Total
+    
+    # Identify unique parent groups
+    unique_parents <- unique(qc_list$group_mapping$Group)
+    
+    for (pg in unique_parents) {
+      # Find subgroups belonging to this parent
+      subgroups <- qc_list$group_mapping$Subgroup[qc_list$group_mapping$Group == pg]
+      
+      # Intersect with columns present in the dataframe
+      valid_cols <- intersect(subgroups, colnames(df_samples))
+      
+      if (length(valid_cols) > 0) {
+        # Calculate sum of final samples for these columns
+        final_row_idx <- which(df_samples$Metric == "Final Samples")
+        
+        # Safe sum handling NAs
+        vals <- as.numeric(df_samples[final_row_idx, valid_cols])
+        group_sum <- sum(vals, na.rm = TRUE)
+        
+        # Identify the LAST column index among the valid columns for this group
+        # This places the total under the rightmost column of the group (e.g., HNSCC_LS)
+        col_indices <- match(valid_cols, colnames(df_samples))
+        target_col_idx <- max(col_indices)
+        target_col_name <- colnames(df_samples)[target_col_idx]
+        
+        total_row[[target_col_name]] <- group_sum
+      }
+    }
+    
+    # Append the row
+    df_samples <- rbind(df_samples, total_row)
+  }
+  
+  # 6. Write to Sheet (Samples Section)
   curr_row <- 1
   writeData(wb, "Summary", "SAMPLES METRICS:", startRow = curr_row)
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
   curr_row <- curr_row + 1
   
   writeData(wb, "Summary", df_samples, startRow = curr_row)
-  curr_row <- curr_row + nrow(df_samples) + 3 # Add spacing (2 empty rows + header)
+  curr_row <- curr_row + nrow(df_samples) + 3 
   
-  # 6. Write to Sheet (Markers Section)
+  # 7. Write to Sheet (Markers Section)
   writeData(wb, "Summary", "MARKERS METRICS:", startRow = curr_row)
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
   curr_row <- curr_row + 1
@@ -166,25 +208,70 @@ save_qc_report <- function(qc_list, out_path) {
   marker_start_row <- curr_row
   writeData(wb, "Summary", df_markers, startRow = marker_start_row)
   
-  # 7. List Final Markers (Formatted 5 per row)
+  # 8. List Final Markers (Organized by Biological Categories)
   if (!is.null(qc_list$final_markers_names) && length(qc_list$final_markers_names) > 0) {
     
     final_mks <- qc_list$final_markers_names
-    n_per_row <- 5
+    formatted_df <- NULL
     
-    # Create matrix for formatted output
-    n_needed <- ceiling(length(final_mks) / n_per_row) * n_per_row
-    mks_padded <- c(final_mks, rep("", n_needed - length(final_mks)))
-    mks_matrix <- matrix(mks_padded, ncol = n_per_row, byrow = TRUE)
+    # Check if category config exists
+    if (!is.null(config) && !is.null(config$qc_reporting$marker_categories)) {
+      
+      cats <- config$qc_reporting$marker_categories
+      
+      # Create list of vectors for the dataframe
+      df_list <- list()
+      categorized_markers <- c()
+      
+      for (cat_name in names(cats)) {
+        # Filter markers belonging to this category that exist in the data
+        expected <- cats[[cat_name]]
+        present <- intersect(expected, final_mks)
+        
+        # Keep track of used markers
+        categorized_markers <- c(categorized_markers, present)
+        
+        if (length(present) > 0) {
+          df_list[[cat_name]] <- present
+        } else {
+          df_list[[cat_name]] <- character(0) 
+        }
+      }
+      
+      # Handle "Others" (Markers in data but not in config)
+      others <- setdiff(final_mks, categorized_markers)
+      if (length(others) > 0) {
+        df_list[["Others"]] <- others
+      }
+      
+      # Convert list to dataframe (pad with empty strings)
+      max_len <- max(sapply(df_list, length))
+      if (max_len > 0) {
+        formatted_df <- data.frame(lapply(df_list, function(x) {
+          c(x, rep("", max_len - length(x)))
+        }), stringsAsFactors = FALSE)
+      }
+      
+    } else {
+      # Fallback to simple matrix if no config provided
+      n_per_row <- 5
+      n_needed <- ceiling(length(final_mks) / n_per_row) * n_per_row
+      mks_padded <- c(final_mks, rep("", n_needed - length(final_mks)))
+      formatted_df <- as.data.frame(matrix(mks_padded, ncol = n_per_row, byrow = TRUE))
+      colnames(formatted_df) <- paste0("Col_", 1:n_per_row)
+    }
     
-    # Determine placement:
-    # Row: The row corresponding to "Final Markers" in the df_markers table
-    # Col: Immediately to the right of the "Total" column (Col 3)
-    final_mk_rel_idx <- which(df_markers$Metric == "Final Markers")
-    insert_row <- marker_start_row + final_mk_rel_idx # +1 for header is handled by writeData default
-    insert_col <- 3 
-    
-    writeData(wb, "Summary", mks_matrix, startRow = insert_row, startCol = insert_col, colNames = FALSE)
+    if (!is.null(formatted_df)) {
+      # Determine placement: Right of the "Total" column (Metrics table)
+      # We insert it to the right of the Markers metrics table
+      insert_row <- marker_start_row 
+      insert_col <- 3 + ncol(df_markers) 
+      
+      writeData(wb, "Summary", "FINAL MARKERS LIST:", startRow = insert_row, startCol = insert_col)
+      addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = insert_row, cols = insert_col)
+      
+      writeData(wb, "Summary", formatted_df, startRow = insert_row + 1, startCol = insert_col)
+    }
   }
   
   # --- Sheet 2: Detailed Dropped Items ---

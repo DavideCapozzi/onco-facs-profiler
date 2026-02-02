@@ -232,6 +232,13 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
     }
   }
   
+  # Capture the mapping between Stratification Column (Subgroup) and Group for the report
+  group_map <- unique(data.frame(
+    Subgroup = if(stratification_col %in% colnames(curr_meta)) as.character(curr_meta[[stratification_col]]) else "All",
+    Group = if("Group" %in% colnames(curr_meta)) as.character(curr_meta$Group) else "All",
+    stringsAsFactors = FALSE
+  ))
+  
   # Final Stats
   qc_summary$n_row_dropped <- nrow(qc_summary$dropped_rows_detail)
   qc_summary$n_row_final <- nrow(curr_mat)
@@ -239,6 +246,8 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
   qc_summary$final_markers_names <- colnames(curr_mat)
   
   qc_summary$breakdown_final <- get_group_counts(curr_meta, stratification_col)
+  
+  qc_summary$group_mapping <- group_map
   
   message(sprintf("   [QC] Final Dimensions: %d Samples x %d Markers", nrow(curr_mat), ncol(curr_mat)))
   

@@ -65,6 +65,63 @@ hybrid_groups:
 metadata:
   subgroup_col: "Original_Source"
 
+# QC Reporting Configuration
+qc_reporting:
+  # Define marker categories for the QC report columns
+  marker_categories:
+    CD3_Lineage:
+      - "CD3"
+      - "CD3CM"
+      - "CD3EFF"
+      - "CD3EM"
+      - "CD3NAIVE"
+      - "CD3KI67"
+      - "CD3KI67CM"
+      - "CD3KI67EFF"
+      - "CD3KI657EMRA"
+      - "CD3KI67NAIVE"
+      - "CD3PD1"
+      - "CD3PD1KI67"
+      - "CD3PD1CM"
+      - "CD3PD1EFF"
+      - "CD3PD1EMRA"
+      - "CD3PD1NAIVE"
+    CD4_Lineage:
+      - "CD4"
+      - "CD4CD28"
+      - "CD4CD137"
+      - "CD4KI67"
+      - "CD4PD1"
+    CD8_Lineage:
+      - "CD8"
+      - "CD8CD28"
+      - "CD8CD137"
+      - "CD8KI67"
+      - "CD8PD1"
+    Tregs:
+      - "TREG"
+      - "RESTING"
+      - "ACTIVE"
+      - "NON-SUPPRESSIVE"
+      - "TREGCD137"
+    Activation_Molecules:
+      - "CD3CD28"
+      - "CD3CD28KI67"
+      - "CD3CD28CM"
+      - "CD3CD28EFF"
+      - "CD3CD28EMRA"
+      - "CD3CD28NAIVE"
+      - "CD3CD137"
+      - "CD3CD137KI67"
+      - "CD3CD137PD1"
+      - "CD3CD137CM"
+      - "CD3CD137EFF"
+      - "CD3CD137EMRA"
+      - "CD3CD137NAIVE"
+    Myeloid_MDSC:
+      - "M-MDSC"
+      - "LOX1-PMN-MDSC"
+
 # --- VISUALS & COLORS ---
 colors:
   # Palette for generic case mapping if specific names are not found below

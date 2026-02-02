@@ -193,7 +193,7 @@ message(sprintf("[QC] Final Dimensions: %d Samples x %d Markers", nrow(mat_raw),
 # Save QC Report
 out_dir <- file.path(config$output_root, "01_data_processing")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"))
+save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"), config = config)
 
 # 4. Final Hybrid Transformation (Complete Mode)
 # ------------------------------------------------------------------------------
