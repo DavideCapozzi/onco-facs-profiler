@@ -156,7 +156,7 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     total_row <- df_samples[1, ]
     total_row[,] <- NA
     total_row$Metric <- "Total (by Group)"
-    total_row$Total <- df_samples[df_samples$Metric == "Final Samples", "Total"] # Grand Total
+    total_row$Total <- df_samples[df_samples$Metric == "Final Samples", "Total"] 
     
     # Identify unique parent groups
     unique_parents <- unique(qc_list$group_mapping$Group)
@@ -177,7 +177,6 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
         group_sum <- sum(vals, na.rm = TRUE)
         
         # Identify the LAST column index among the valid columns for this group
-        # This places the total under the rightmost column of the group (e.g., HNSCC_LS)
         col_indices <- match(valid_cols, colnames(df_samples))
         target_col_idx <- max(col_indices)
         target_col_name <- colnames(df_samples)[target_col_idx]
@@ -200,13 +199,15 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   curr_row <- curr_row + nrow(df_samples) + 3 
   
   # 7. Write to Sheet (Markers Section)
-  writeData(wb, "Summary", "MARKERS METRICS:", startRow = curr_row)
-  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
-  curr_row <- curr_row + 1
+  # Capture the specific row index for the header to align the second table
+  marker_header_row <- curr_row
   
-  # Keep track of where the markers table starts
-  marker_start_row <- curr_row
-  writeData(wb, "Summary", df_markers, startRow = marker_start_row)
+  writeData(wb, "Summary", "MARKERS METRICS:", startRow = marker_header_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = marker_header_row, cols = 1)
+  
+  # Increment row for the data table
+  curr_row <- curr_row + 1
+  writeData(wb, "Summary", df_markers, startRow = curr_row)
   
   # 8. List Final Markers (Organized by Biological Categories)
   if (!is.null(qc_list$final_markers_names) && length(qc_list$final_markers_names) > 0) {
@@ -262,15 +263,19 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     }
     
     if (!is.null(formatted_df)) {
-      # Determine placement: Right of the "Total" column (Metrics table)
-      # We insert it to the right of the Markers metrics table
-      insert_row <- marker_start_row 
-      insert_col <- 3 + ncol(df_markers) 
+      # Placement Logic:
+      # Row: Same as "MARKERS METRICS" header
+      # Col: 1 (Start) + ncol(df_markers) (Table width) + 1 (Gap) + 1 (Next position)
+      # df_markers typically has 2 columns (Metric, Total), so insertion is at Col 4.
+      insert_row <- marker_header_row
+      insert_col <- 1 + ncol(df_markers) + 1
       
       writeData(wb, "Summary", "FINAL MARKERS LIST:", startRow = insert_row, startCol = insert_col)
       addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = insert_row, cols = insert_col)
       
-      writeData(wb, "Summary", formatted_df, startRow = insert_row + 1, startCol = insert_col)
+      # Write the data table starting one row below the header
+      # colNames = FALSE hides the category headers as requested
+      writeData(wb, "Summary", formatted_df, startRow = insert_row + 1, startCol = insert_col, colNames = FALSE)
     }
   }
   
