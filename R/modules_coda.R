@@ -187,6 +187,9 @@ coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage")
   p <- mat
   
   if (input_type == "percentage") {
+    if (any(mat > 100, na.rm = TRUE)) {
+      stop("[CoDa] Critical Error: Detected values > 100 during Logit transformation. Values expected as percentages.")
+    }
     p <- mat / 100
   }
   
