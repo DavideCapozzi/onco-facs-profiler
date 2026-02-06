@@ -90,210 +90,167 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   # --- Sheet 1: Summary with Group Breakdown ---
   addWorksheet(wb, "Summary")
   
-  # 1. Prepare Metrics Vectors
-  metrics_samples <- c("Initial Samples", 
-                       "Dropped Samples (A Priori)", 
-                       "Dropped Samples (QC)", 
-                       "Final Samples")
+  # 1. Data Preparation & Calculation
   
-  metrics_markers <- c("Initial Markers", 
-                       "Dropped Markers (A Priori)", 
-                       "Dropped Markers (High NA)", 
-                       "Dropped Markers (Zero Var)", 
-                       "Final Markers")
+  # Extract Base Counts per Subgroup
+  # Final Counts
+  final_counts <- if(!is.null(qc_list$breakdown_final)) as.numeric(qc_list$breakdown_final) else numeric(0)
+  if(!is.null(qc_list$breakdown_final)) names(final_counts) <- names(qc_list$breakdown_final)
   
-  # 2. Extract Counts
-  n_samples_apriori <- if(!is.null(qc_list$dropped_samples_apriori)) nrow(qc_list$dropped_samples_apriori) else 0
+  # Dropped QC Counts
+  drop_qc_df <- qc_list$dropped_rows_detail
+  drop_qc_counts <- numeric(0)
+  if (!is.null(drop_qc_df) && nrow(drop_qc_df) > 0 && "Original_Source" %in% names(drop_qc_df)) {
+    tbl <- table(drop_qc_df$Original_Source)
+    drop_qc_counts <- as.numeric(tbl)
+    names(drop_qc_counts) <- names(tbl)
+  }
+  
+  # Dropped A Priori Counts
+  drop_pre_df <- qc_list$dropped_samples_apriori
+  drop_pre_counts <- numeric(0)
+  if (!is.null(drop_pre_df) && nrow(drop_pre_df) > 0 && "Original_Source" %in% names(drop_pre_df)) {
+    tbl <- table(drop_pre_df$Original_Source)
+    drop_pre_counts <- as.numeric(tbl)
+    names(drop_pre_counts) <- names(tbl)
+  }
+  
+  # Calculate Derived Metrics per Subgroup
+  all_subgroups <- unique(c(names(final_counts), names(drop_qc_counts), names(drop_pre_counts)))
+  all_subgroups <- sort(all_subgroups)
+  
+  # Structure: list(SubgroupName = list(Init, DropPre, DropQC, Final))
+  subgroup_stats <- list()
+  
+  for(sg in all_subgroups) {
+    v_fin <- if(sg %in% names(final_counts)) final_counts[[sg]] else 0
+    v_qc  <- if(sg %in% names(drop_qc_counts)) drop_qc_counts[[sg]] else 0
+    v_pre <- if(sg %in% names(drop_pre_counts)) drop_pre_counts[[sg]] else 0
+    v_init <- v_fin + v_qc + v_pre
+    
+    subgroup_stats[[sg]] <- list(Initial = v_init, DropPre = v_pre, DropQC  = v_qc, Final   = v_fin)
+  }
+  
+  # Calculate Grand Totals
+  total_final <- sum(sapply(subgroup_stats, function(x) x$Final))
+  total_qc    <- sum(sapply(subgroup_stats, function(x) x$DropQC))
+  total_pre   <- sum(sapply(subgroup_stats, function(x) x$DropPre))
+  total_init  <- total_final + total_qc + total_pre
+  
+  # 2. Build Table 1: Detailed Dropped Metrics (Subgroup Level)
+  
+  metrics_detailed <- c("Initial Samples", 
+                        "Dropped Samples (A Priori)", 
+                        "Dropped Samples (QC)", 
+                        "Final Samples")
+  
+  totals_vector <- c(total_init, -total_pre, -total_qc, total_final)
+  
+  df_detailed <- data.frame(Metric = metrics_detailed, Total = totals_vector, stringsAsFactors = FALSE)
+  
+  for (sg in all_subgroups) {
+    s <- subgroup_stats[[sg]]
+    df_detailed[[sg]] <- c(s$Initial, -s$DropPre, -s$DropQC, s$Final)
+  }
+  
+  # 3. Build Table 2: By Group Dropping Metrics (Macro/Parent Level)
+  
+  # Identify Parent Groups
+  if(!is.null(qc_list$group_mapping)) {
+    unique_parents <- unique(qc_list$group_mapping$Group)
+    unique_parents <- sort(unique_parents) 
+  } else {
+    unique_parents <- character(0)
+  }
+  
+  # Identify Control vs Case Parents
+  is_control_func <- function(g_name) grepl("Healthy|Control", g_name, ignore.case = TRUE)
+  ctrl_parents <- unique_parents[sapply(unique_parents, is_control_func)]
+  case_parents <- unique_parents[!sapply(unique_parents, is_control_func)]
+  
+  # Helper: Aggregate metrics for a list of parents
+  get_aggregated_macro_stats <- function(parent_list, mapping, sub_stats) {
+    sum_init <- 0
+    sum_drop <- 0
+    sum_fin  <- 0
+    
+    # Get all subgroups belonging to these parents
+    relevant_subgroups <- mapping$Subgroup[mapping$Group %in% parent_list]
+    relevant_subgroups <- intersect(relevant_subgroups, names(sub_stats))
+    
+    for(sg in relevant_subgroups) {
+      s <- sub_stats[[sg]]
+      sum_init <- sum_init + s$Initial
+      sum_drop <- sum_drop - (s$DropPre + s$DropQC) # Sum and ensure negative
+      sum_fin  <- sum_fin + s$Final
+    }
+    return(c(sum_init, sum_drop, sum_fin))
+  }
+  
+  # Initialize DataFrame
+  metrics_macro <- c("Initial", "Dropped Samples", "Final")
+  total_dropped_combined <- -(total_pre + total_qc)
+  
+  df_macro <- data.frame(Metric = metrics_parent <- metrics_macro, 
+                         Total = c(total_init, total_dropped_combined, total_final), 
+                         stringsAsFactors = FALSE)
+  
+  # Add Control Column (Aggregated)
+  if(length(ctrl_parents) > 0) {
+    # Naming logic: Healthy_Donors_tot + ...
+    col_name <- paste0(ctrl_parents, "_tot", collapse = " + ")
+    df_macro[[col_name]] <- get_aggregated_macro_stats(ctrl_parents, qc_list$group_mapping, subgroup_stats)
+  }
+  
+  # Add Case Column (Aggregated)
+  if(length(case_parents) > 0) {
+    # Naming logic: HNSCC_tot + NSCLC_tot
+    col_name <- paste0(case_parents, "_tot", collapse = " + ")
+    df_macro[[col_name]] <- get_aggregated_macro_stats(case_parents, qc_list$group_mapping, subgroup_stats)
+  }
+  
+  # 4. Writing to Excel
+  
+  curr_row <- 1
+  
+  # Section 1: Detailed Dropped Metrics
+  writeData(wb, "Summary", "DETAILED DROPPED METRICS:", startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
+  curr_row <- curr_row + 1
+  
+  writeData(wb, "Summary", df_detailed, startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_detailed), gridExpand = TRUE)
+  
+  curr_row <- curr_row + nrow(df_detailed) + 2 
+  
+  # Section 2: By Group Dropping Metrics (Macro Level)
+  writeData(wb, "Summary", "BY GROUP DROPPING METRICS:", startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
+  curr_row <- curr_row + 1
+  
+  writeData(wb, "Summary", df_macro, startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_macro), gridExpand = TRUE)
+  
+  curr_row <- curr_row + nrow(df_macro) + 2
+  
+  # Section 3: Markers Metrics
   n_markers_apriori <- if(!is.null(qc_list$dropped_markers_apriori)) nrow(qc_list$dropped_markers_apriori) else 0
-  
-  totals_samples <- c(qc_list$n_row_init,
-                      n_samples_apriori,
-                      qc_list$n_row_dropped,
-                      qc_list$n_row_final)
-  
   totals_markers <- c(qc_list$n_col_init,
                       n_markers_apriori,
                       qc_list$n_col_dropped,
                       qc_list$n_col_zerovar,
                       qc_list$n_col_final)
-  
-  # 3. Build Main Dataframes
-  df_samples <- data.frame(Metric = metrics_samples, Total = totals_samples, stringsAsFactors = FALSE)
+  metrics_markers <- c("Initial Markers", "Dropped Markers (A Priori)", "Dropped Markers (High NA)", "Dropped Markers (Zero Var)", "Final Markers")
   df_markers <- data.frame(Metric = metrics_markers, Total = totals_markers, stringsAsFactors = FALSE)
   
-  # 4. Integrate Group Breakdowns (Dynamic Columns) 
-  if (!is.null(qc_list$breakdown_init)) {
-    group_names <- names(qc_list$breakdown_init)
-    
-    # Initialize group columns with NA
-    for (g in group_names) {
-      df_samples[[g]] <- NA
-    }
-    
-    # Helper to map counts
-    fill_row_counts <- function(df, metric_name, counts) {
-      if (is.null(counts)) return(df)
-      row_idx <- which(df$Metric == metric_name)
-      if (length(row_idx) == 0) return(df)
-      
-      for (g in names(counts)) {
-        if (g %in% colnames(df)) {
-          df[row_idx, g] <- as.numeric(counts[g])
-        }
-      }
-      return(df)
-    }
-    
-    # Fill Sample Counts
-    df_samples <- fill_row_counts(df_samples, "Initial Samples", qc_list$breakdown_init)
-    df_samples <- fill_row_counts(df_samples, "Final Samples", qc_list$breakdown_final)
-  }
-  
-  # 5. Build Detached "FINAL SAMPLES" Section
-  df_final_samples <- data.frame()
-  
-  if (!is.null(qc_list$group_mapping) && !is.null(qc_list$breakdown_final)) {
-    
-    base_cols <- colnames(df_samples)
-    
-    # A) "Divided" Row: Copy of Final Samples
-    row_divided <- df_samples[df_samples$Metric == "Final Samples", ]
-    row_divided$Metric <- "Divided"
-    
-    # B) "Total (by Group)" Row
-    row_total_grp <- row_divided
-    row_total_grp[,] <- NA
-    row_total_grp$Metric <- "Total (by Group)"
-    row_total_grp$Total <- row_divided$Total
-    
-    # Calculate Sums by Parent Group
-    unique_parents <- unique(qc_list$group_mapping$Group)
-    
-    for (pg in unique_parents) {
-      subgroups <- qc_list$group_mapping$Subgroup[qc_list$group_mapping$Group == pg]
-      valid_cols <- intersect(subgroups, base_cols)
-      
-      if (length(valid_cols) > 0) {
-        vals <- as.numeric(row_divided[1, valid_cols])
-        group_sum <- sum(vals, na.rm = TRUE)
-        
-        # Place in the LAST (Rightmost) column of the group
-        col_indices <- match(valid_cols, base_cols)
-        target_col <- base_cols[max(col_indices)]
-        
-        row_total_grp[[target_col]] <- group_sum
-      }
-    }
-    
-    # C) Empty Row (Spacer)
-    row_empty <- row_divided
-    row_empty[,] <- NA
-    row_empty$Metric <- ""
-    
-    # D) Headers for Control/Case Row
-    row_headers <- row_divided
-    row_headers[,] <- NA
-    row_headers$Metric <- "" 
-    
-    # E) "Final" Row (Aggregated Control vs Case)
-    row_cc <- row_divided
-    row_cc[,] <- NA
-    row_cc$Metric <- "Final"
-    
-    # Helper to identify Control vs Case
-    is_control <- function(g_name) grepl("Healthy|Control", g_name, ignore.case = TRUE)
-    
-    ctrl_sum <- 0
-    case_sum <- 0
-    
-    # Collect all column indices for Control and Case to find the rightmost one later
-    ctrl_cols_all <- c()
-    case_cols_all <- c()
-    
-    for (pg in unique_parents) {
-      subgroups <- qc_list$group_mapping$Subgroup[qc_list$group_mapping$Group == pg]
-      valid_cols <- intersect(subgroups, base_cols)
-      
-      if (length(valid_cols) > 0) {
-        vals <- as.numeric(row_divided[1, valid_cols])
-        g_sum <- sum(vals, na.rm = TRUE)
-        col_indices <- match(valid_cols, base_cols)
-        
-        if (is_control(pg)) {
-          ctrl_sum <- ctrl_sum + g_sum
-          ctrl_cols_all <- c(ctrl_cols_all, col_indices)
-        } else {
-          case_sum <- case_sum + g_sum
-          case_cols_all <- c(case_cols_all, col_indices)
-        }
-      }
-    }
-    
-    # Place Control Header and Value (Rightmost column of Control block)
-    if (length(ctrl_cols_all) > 0) {
-      target_col_ctrl <- base_cols[max(ctrl_cols_all)]
-      row_headers[[target_col_ctrl]] <- "Control"
-      row_cc[[target_col_ctrl]] <- ctrl_sum
-    }
-    
-    # Place Case Header and Value (Rightmost column of Case block)
-    if (length(case_cols_all) > 0) {
-      target_col_case <- base_cols[max(case_cols_all)]
-      row_headers[[target_col_case]] <- "Case"
-      row_cc[[target_col_case]] <- case_sum
-    }
-    
-    # Assemble dataframe with character conversion
-    df_final_samples <- rbind(
-      data.frame(lapply(row_divided, as.character), stringsAsFactors=FALSE),
-      data.frame(lapply(row_total_grp, as.character), stringsAsFactors=FALSE),
-      data.frame(lapply(row_empty, as.character), stringsAsFactors=FALSE), # Spacer
-      data.frame(lapply(row_headers, as.character), stringsAsFactors=FALSE),
-      data.frame(lapply(row_cc, as.character), stringsAsFactors=FALSE)
-    )
-  }
-  
-  # 6. Write to Sheet (Samples Section)
-  curr_row <- 1
-  writeData(wb, "Summary", "SAMPLES METRICS:", startRow = curr_row)
+  writeData(wb, "Summary", "MARKERS METRICS:", startRow = curr_row)
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
-  curr_row <- curr_row + 1
-  
-  # Write Main Table
-  writeData(wb, "Summary", df_samples, startRow = curr_row)
-  curr_row <- curr_row + nrow(df_samples) + 2 
-  
-  # Write Detached "FINAL SAMPLES" Section
-  if (nrow(df_final_samples) > 0) {
-    writeData(wb, "Summary", "FINAL SAMPLES:", startRow = curr_row)
-    addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
-    curr_row <- curr_row + 1
-    
-    # Write dataframe without column names
-    writeData(wb, "Summary", df_final_samples, startRow = curr_row, colNames = FALSE)
-    
-    # Style the Headers Row (Row 4 in the detached dataframe: Divided, Total, Empty, Headers, Final)
-    header_row_idx <- curr_row + 3 
-    addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = header_row_idx, cols = 1:ncol(df_final_samples), gridExpand = TRUE)
-    
-    curr_row <- curr_row + nrow(df_final_samples) + 2
-  } else {
-    curr_row <- curr_row + 1
-  }
-  
-  # 7. Write to Sheet (Markers Section)
-  marker_header_row <- curr_row
-  
-  writeData(wb, "Summary", "MARKERS METRICS:", startRow = marker_header_row)
-  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = marker_header_row, cols = 1)
-  
   curr_row <- curr_row + 1
   writeData(wb, "Summary", df_markers, startRow = curr_row)
   curr_row <- curr_row + nrow(df_markers) + 2 
   
-  # 8. List Final Markers
+  # Section 4: Final Markers List
   if (!is.null(qc_list$final_markers_names) && length(qc_list$final_markers_names) > 0) {
-    
     final_mks <- qc_list$final_markers_names
     formatted_df <- NULL
     
@@ -327,21 +284,16 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     }
     
     if (!is.null(formatted_df)) {
-      insert_row <- curr_row
-      insert_col <- 1 
-      
-      writeData(wb, "Summary", "FINAL MARKERS LIST:", startRow = insert_row, startCol = insert_col)
-      addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = insert_row, cols = insert_col)
-      
-      writeData(wb, "Summary", formatted_df, startRow = insert_row + 1, startCol = insert_col, colNames = FALSE)
+      writeData(wb, "Summary", "FINAL MARKERS LIST:", startRow = curr_row)
+      addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
+      writeData(wb, "Summary", formatted_df, startRow = curr_row + 1, colNames = FALSE)
     }
   }
   
-  # --- Sheet 2: Detailed Dropped Items ---
+  # Sheet 2: Details Dropped
   addWorksheet(wb, "Details_Dropped")
   curr_row_det <- 1
   dropped_patients_all <- data.frame()
-  
   if (!is.null(qc_list$dropped_samples_apriori) && nrow(qc_list$dropped_samples_apriori) > 0) {
     dropped_patients_all <- rbind(dropped_patients_all, qc_list$dropped_samples_apriori)
   }
@@ -354,26 +306,23 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     cols_order <- c(cols_order, setdiff(names(dropped_patients_all), cols_order))
     dropped_patients_all <- dropped_patients_all[, cols_order, drop=FALSE]
     
-    writeData(wb, "Details_Dropped", "Dropped Samples (A priori & QC Filtering):", startRow = curr_row_det)
+    writeData(wb, "Details_Dropped", "Dropped Samples:", startRow = curr_row_det)
     addStyle(wb, "Details_Dropped", createStyle(textDecoration = "bold"), rows = curr_row_det, cols = 1)
-    curr_row_det <- curr_row_det + 1
-    writeData(wb, "Details_Dropped", dropped_patients_all, startRow = curr_row_det)
+    writeData(wb, "Details_Dropped", dropped_patients_all, startRow = curr_row_det + 1)
     curr_row_det <- curr_row_det + nrow(dropped_patients_all) + 3
   }
   
   if (!is.null(qc_list$dropped_markers_apriori) && nrow(qc_list$dropped_markers_apriori) > 0) {
-    writeData(wb, "Details_Dropped", "Markers Excluded by Config (A Priori):", startRow = curr_row_det)
+    writeData(wb, "Details_Dropped", "Markers Excluded (A Priori):", startRow = curr_row_det)
     addStyle(wb, "Details_Dropped", createStyle(textDecoration = "bold"), rows = curr_row_det, cols = 1)
-    curr_row_det <- curr_row_det + 1
-    writeData(wb, "Details_Dropped", qc_list$dropped_markers_apriori, startRow = curr_row_det)
+    writeData(wb, "Details_Dropped", qc_list$dropped_markers_apriori, startRow = curr_row_det + 1)
     curr_row_det <- curr_row_det + nrow(qc_list$dropped_markers_apriori) + 3
   }
   
   if (nrow(qc_list$dropped_cols_detail) > 0) {
-    writeData(wb, "Details_Dropped", "Dropped Markers (QC - > Threshold NA):", startRow = curr_row_det)
+    writeData(wb, "Details_Dropped", "Dropped Markers (QC):", startRow = curr_row_det)
     addStyle(wb, "Details_Dropped", createStyle(textDecoration = "bold"), rows = curr_row_det, cols = 1)
-    curr_row_det <- curr_row_det + 1
-    writeData(wb, "Details_Dropped", qc_list$dropped_cols_detail, startRow = curr_row_det)
+    writeData(wb, "Details_Dropped", qc_list$dropped_cols_detail, startRow = curr_row_det + 1)
   }
   
   saveWorkbook(wb, out_path, overwrite = TRUE)

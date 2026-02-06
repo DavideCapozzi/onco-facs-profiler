@@ -170,8 +170,7 @@ qc:
   outlier_conf_level: 0.99
 
 # --- Imputation (CoDa) ---
-imputation:
-  method: "czm_multrepl"      
+imputation:   
   epsilon: 0.000001
 
 # --- Multivariate & Interpretation ---
