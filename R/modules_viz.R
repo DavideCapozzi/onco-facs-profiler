@@ -30,58 +30,100 @@ theme_coda <- function() {
     )
 }
 
-#' @title Generate Dynamic Group Palette
+# R/modules_viz.R
+
+# R/modules_viz.R
+
+#' @title Generate Dynamic Group Palette (Root-Aware)
 #' @description 
-#' Centralized color logic. Priority:
-#' 1. Specific Override (config$colors$groups)
-#' 2. Control Groups (Fixed Color)
-#' 3. Case Groups (Recycled Palette, no gradients)
+#' Centralized color logic with intelligent matching using a safe List-based approach.
+#' Priority:
+#' 1. Exact Match in Config (e.g., "NSCLC_LS" -> config "NSCLC_LS")
+#' 2. Root Match (e.g., "NSCLC_EP" -> matches config "NSCLC")
+#' 3. Control/Case Defaults
+#' 
 #' @param config The loaded configuration list.
+#' @param match_groups Character vector of groups present in the data (optional). 
 #' @return A named vector of hex codes.
-get_palette <- function(config) {
+get_palette <- function(config, match_groups = NULL) {
   
-  final_palette <- character()
+  # Initialize as LIST to allow safe NULL checks for missing keys
+  # (Character vectors crash on [[missing_key]])
+  final_palette <- list()
   
-  # 1. Defaults setup
-  ctrl_col <- if(!is.null(config$colors$control)) config$colors$control else "grey50"
-  case_cols <- if(!is.null(config$colors$cases)) config$colors$cases else c("#CD5C5C", "#4682B4")
+  # 1. Defaults setup (Safety unlist to handle YAML quirks)
+  ctrl_col <- if(!is.null(config$colors$control)) unlist(config$colors$control) else "grey50"
+  case_cols <- if(!is.null(config$colors$cases)) unlist(config$colors$cases) else c("#CD5C5C", "#4682B4")
   
-  # 2. Assign Control Colors
-  # Iterates over all defined control groups to ensure coverage
-  if (!is.null(config$control_group)) {
-    for(g in config$control_group) {
-      final_palette[[g]] <- ctrl_col
+  # Base lists from config
+  defined_colors <- if(!is.null(config$colors$groups)) config$colors$groups else list()
+  ctrl_groups_cfg <- unlist(config$control_group)
+  case_groups_cfg <- unlist(config$case_groups)
+  
+  # Combine specific definitions into the palette first
+  for (grp in names(defined_colors)) {
+    final_palette[[grp]] <- defined_colors[[grp]]
+  }
+  
+  # 2. Assign Generic Control/Case Colors for items in Config not yet colored
+  if (!is.null(ctrl_groups_cfg)) {
+    for(g in ctrl_groups_cfg) {
+      if(is.null(final_palette[[g]])) final_palette[[g]] <- ctrl_col
     }
   }
   
-  # 3. Assign Case Colors (with Recycling Logic)
-  if (!is.null(config$case_groups)) {
-    case_grps <- config$case_groups
-    
-    for (i in seq_along(case_grps)) {
-      grp <- case_grps[i]
-      
-      # Priority A: Check specific override in config
-      if (!is.null(config$colors$groups) && !is.null(config$colors$groups[[grp]])) {
-        final_palette[[grp]] <- config$colors$groups[[grp]]
-      } else {
-        # Priority B: Recycle case palette (Modulo operator)
-        # Guarantees distinct colors matching the statistical report style
+  if (!is.null(case_groups_cfg)) {
+    for (i in seq_along(case_groups_cfg)) {
+      grp <- case_groups_cfg[i]
+      if(is.null(final_palette[[grp]])) {
+        # Cycle through available case colors
         col_idx <- (i - 1) %% length(case_cols) + 1
         final_palette[[grp]] <- case_cols[col_idx]
       }
     }
   }
   
-  # 4. Generic Fallback keys (useful for binary plots/summaries)
-  if (!("Case" %in% names(final_palette))) {
-    final_palette[["Case"]] <- if(!is.null(config$colors$Case)) config$colors$Case else "#CD5C5C"
+  # 3. Data-Driven Extension (Root Matching)
+  if (!is.null(match_groups)) {
+    # Remove NAs and convert to character
+    unique_data_groups <- unique(as.character(na.omit(match_groups)))
+    
+    for (g_data in unique_data_groups) {
+      
+      # Case A: Already has a color (Exact match)
+      if (!is.null(final_palette[[g_data]])) next
+      
+      # Case B: Try Root Matching (Split by first underscore)
+      # e.g., "NSCLC_EP" -> Root "NSCLC"
+      root_name <- strsplit(g_data, "_")[[1]][1]
+      
+      # Safe lookup because final_palette is a list
+      if (!is.null(final_palette[[root_name]])) {
+        # Inherit color from Root
+        final_palette[[g_data]] <- final_palette[[root_name]]
+        
+      } else {
+        # Case C: Fallback
+        if (g_data %in% ctrl_groups_cfg) {
+          final_palette[[g_data]] <- ctrl_col
+        } else {
+          # Default fallback for unknown groups
+          final_palette[[g_data]] <- case_cols[1] 
+        }
+      }
+    }
   }
-  if (!("Control" %in% names(final_palette))) {
+  
+  # 4. Generic Fallback keys (required for legends sometimes)
+  if (is.null(final_palette[["Case"]])) {
+    final_palette[["Case"]] <- case_cols[1]
+  }
+  if (is.null(final_palette[["Control"]])) {
     final_palette[["Control"]] <- ctrl_col
   }
   
-  return(final_palette)
+  # Convert back to named character vector for ggplot
+  return(unlist(final_palette))
 }
 
 #' @title Plot Merged Raw Distribution with Highlights & Stats

@@ -76,8 +76,9 @@ df_global$Group <- factor(df_global$Group, levels = target_all)
 meta_viz$Group <- factor(meta_viz$Group, levels = target_all)
 
 # --- DYNAMIC COLOR ASSIGNMENT ---
-full_palette <- get_palette(config)
-current_palette <- full_palette[target_all]
+clean_targets <- unique(as.character(na.omit(target_all)))
+full_palette <- get_palette(config, match_groups = clean_targets)
+current_palette <- full_palette[clean_targets]
 
 if (any(is.na(current_palette))) {
   na_grps <- target_all[is.na(current_palette)]

@@ -54,11 +54,15 @@ message(sprintf("[Viz] Analyzed Set: %d Samples across %d Macro-Groups",
 
 # 3. Colors Setup 
 # ------------------------------------------------------------------------------
-full_palette <- get_palette(config)
-unique_groups <- unique(as.character(meta_viz$Group))
+# Ensure no NAs are passed to the palette generator
+unique_groups <- unique(as.character(na.omit(meta_viz$Group)))
 
-# Subset palette for groups present in current data
+# Pass match_groups to activate root matching
+full_palette <- get_palette(config, match_groups = unique_groups)
+
+# Subset safely
 colors_viz <- full_palette[unique_groups]
+
 names(colors_viz) <- unique_groups 
 
 # Fallback: Handle groups present in data but undefined in config
