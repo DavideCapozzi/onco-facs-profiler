@@ -86,18 +86,34 @@ mat_raw <- mat_raw[, target_markers, drop = FALSE]
 
 # 2.1 Data Assumption Validation
 # ------------------------------------------------------------------------------
-# We strictly assume input data are PERCENTAGES (0-100) 
-# This check ensures we don't accidentally process Proportions (0-1) which would
-# become tiny numbers when divided by 100.
+# Strictly validate data range against configuration to prevent mathematical errors
+# in Logit transformation.
+
+target_format <- if (!is.null(config$input_format)) config$input_format else "percentage"
 max_val <- max(mat_raw, na.rm = TRUE)
 
-if (max_val <= 1.05) { # Tolerance slightly above 1.0
-  warning(sprintf(
-    "\n[CAUTION] Data max value is %.2f. Expected input is PERCENTAGES (0-100).\nIf this is actually Proportions (0-1), the pipeline will divide by 100 again, causing errors.\nPlease check your raw input file.", 
-    max_val
-  ))
+message(sprintf("[Check] Input format configured as: '%s'. Max observed value: %.2f", target_format, max_val))
+
+if (target_format == "percentage") {
+  # Expectation: Values 0-100.
+  # Warning if max is small (looks like proportion), but allow proceeding (rare populations case).
+  if (max_val <= 1.0) {
+    warning(sprintf(
+      "\n[CAUTION] Config is 'percentage' but max value is %.2f. \nIf these are actually Proportions (0-1), pipeline will divide by 100, crushing variance.\nPlease verify your raw input.", 
+      max_val
+    ))
+  }
+} else if (target_format == "proportion") {
+  # Expectation: Values 0-1.
+  # Critical Error if max > 1.0 (Logit of >1 is NaN).
+  if (max_val > 1.0) {
+    stop(sprintf(
+      "[FATAL] Config is 'proportion' but detected values > 1.0 (Max=%.2f). \nPlease change config to 'percentage' or check raw data.", 
+      max_val
+    ))
+  }
 } else {
-  message(sprintf("[Check] Data range confirmed compatible with Percentage mode (Max=%.2f).", max_val))
+  stop("[FATAL] Invalid 'input_format' in config. Use 'percentage' or 'proportion'.")
 }
 
 # 3. Geometric-Aware Quality Control (Split Strategy)

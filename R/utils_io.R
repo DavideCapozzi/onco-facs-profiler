@@ -165,7 +165,6 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   }
   
   # --- Table 2: By Group Dropping Metrics (Parent Level) ---
-  # Determine Parent Groups from Mapping or fallback to unique names
   if(!is.null(qc_list$group_mapping)) {
     mapping <- qc_list$group_mapping
     unique_parents <- sort(unique(mapping$Group))
@@ -193,15 +192,16 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   # Aggregated Control Column
   if(length(ctrl_parents) > 0) {
     all_ctrl_subs <- mapping$Subgroup[mapping$Group %in% ctrl_parents]
-    col_name <- paste0(paste(ctrl_parents, collapse=" + "), "_tot")
-    if (length(ctrl_parents) == 1) col_name <- paste0(ctrl_parents, "_tot") 
+    # Apply suffix to each parent individually before collapsing
+    col_name <- paste0(paste0(ctrl_parents, "_tot"), collapse = " + ")
     df_macro[[col_name]] <- aggregate_metrics(all_ctrl_subs)
   }
   
   # Aggregated Case Column
   if(length(case_parents) > 0) {
     all_case_subs <- mapping$Subgroup[mapping$Group %in% case_parents]
-    col_name <- paste0(paste(case_parents, collapse=" + "), "_tot")
+    # Apply suffix to each parent individually before collapsing
+    col_name <- paste0(paste0(case_parents, "_tot"), collapse = " + ")
     df_macro[[col_name]] <- aggregate_metrics(all_case_subs)
   }
   
@@ -219,7 +219,7 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   curr_row <- curr_row + nrow(df_detailed) + 2 
   
   # Section 2: By Group Dropping Metrics (Parent Level)
-  writeData(wb, "Summary", "BY GROUP DROPPING METRICS (PARENT LEVEL):", startRow = curr_row)
+  writeData(wb, "Summary", "BY GROUP DROPPING METRICS:", startRow = curr_row)
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
   curr_row <- curr_row + 1
   
@@ -255,7 +255,7 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_markers), gridExpand = TRUE)
   curr_row <- curr_row + nrow(df_markers) + 2 
   
-  # Section 5: Final Markers List (Format originale ripristinato)
+  # Section 5: Final Markers List
   if (!is.null(qc_list$final_markers_names) && length(qc_list$final_markers_names) > 0) {
     final_mks <- qc_list$final_markers_names
     formatted_df <- NULL
@@ -297,9 +297,8 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     if (!is.null(formatted_df)) {
       writeData(wb, "Summary", "FINAL MARKERS LIST:", startRow = curr_row)
       addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
-      writeData(wb, "Summary", formatted_df, startRow = curr_row + 1)
-      # Optional: Bold headers of marker categories
-      addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row + 1, cols = 1:ncol(formatted_df), gridExpand = TRUE)
+      # Write data without column names (lineage headers)
+      writeData(wb, "Summary", formatted_df, startRow = curr_row + 1, colNames = FALSE)
     }
   }
   

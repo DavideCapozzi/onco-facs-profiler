@@ -6,6 +6,7 @@
 output_root: "results"
 project_name: "longsurvivors"
 input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4_anonimo.xlsx"
+input_format: "percentage"  # Options: "percentage" (0-100) or "proportion" (0-1)
 
 # --- ANALYSIS TARGETS ---
 # Define here exactly which groups form the analysis.
@@ -114,10 +115,10 @@ qc_reporting:
       - "CD4KI67"
       - "CD4PD1"
     Tregs:
-      - "TREG"
-      - "RESTING"
-      - "ACTIVE"
-      - "NON-SUPPRESSIVE"
+      - "TREG_TOTAL"
+      - "TREG_RESTING"
+      - "TREG_ACTIVE"
+      - "TREG_NON-SUPPRESSIVE"
       - "TREGCD137"
     Myeloid_MDSC:
       - "M-MDSC"

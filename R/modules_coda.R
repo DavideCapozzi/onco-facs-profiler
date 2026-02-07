@@ -180,30 +180,47 @@ coda_compute_local_ilr <- function(mat_imputed, hybrid_groups) {
   return(ilr_results)
 }
 
-#' @title Robust Logit Transformation (Strict Percentage Mode)
-#' @description Transforms percentages (0-100) into Logit space (Log-Odds).
+#' @title Robust Logit Transformation
+#' @description 
+#' Transforms values into Logit space (Log-Odds).
+#' Handles scale normalization based on input type (Percentage vs Proportion).
+#' 
+#' @param mat Numeric matrix.
+#' @param epsilon Boundary protection value.
+#' @param input_type String. "percentage" (divides by 100) or "proportion" (keeps as is).
+#' @return Numeric matrix in logit space.
 coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage") {
   
   p <- mat
   
+  # 1. Normalize Scale
   if (input_type == "percentage") {
+    # Check consistency
     if (any(mat > 100, na.rm = TRUE)) {
-      stop("[CoDa] Critical Error: Detected values > 100 during Logit transformation. Values expected as percentages.")
+      stop("[CoDa] Critical Error: Values > 100 detected in percentage mode.")
     }
     p <- mat / 100
+  } else {
+    # Proportion mode checks
+    if (any(mat > 1.0 + epsilon, na.rm = TRUE)) {
+      stop("[CoDa] Critical Error: Values > 1.0 detected in proportion mode.")
+    }
   }
   
-  # Boundary Protection (Clamping)
+  # 2. Boundary Protection (Clamping)
+  # Ensure p is strictly within (0, 1) exclusive
   n_low  <- sum(p < epsilon, na.rm = TRUE)
   n_high <- sum(p > (1 - epsilon), na.rm = TRUE)
   
   if (n_low > 0 || n_high > 0) {
-    message(sprintf("   [CoDa] Clamped %d boundary values (0 or 1) to epsilon range.", n_low + n_high))
+    # Optional: Log clamping actions if needed
+    # message(sprintf("   [CoDa] Clamped %d boundary values.", n_low + n_high))
   }
   
   p[p < epsilon] <- epsilon
   p[p > (1 - epsilon)] <- 1 - epsilon
   
+  # 3. Transform
   logit_mat <- log(p / (1 - p))
   return(logit_mat)
 }
@@ -333,26 +350,31 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
 }
 
 #' @title Perform Hybrid Transformation Pipeline
+#' @description 
+#' Orchestrates the transformation:
+#' - Track A (Compositional): CZM -> CLR -> ILR (Scale invariant)
+#' - Track B (Functional): Epsilon -> Logit (Scale sensitive) -> BPCA
 #' @export
 perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
   
   if (!mode %in% c("complete", "fast")) stop("Mode must be 'complete' or 'fast'.")
   
-  # Retrieve epsilon from config with safe default
+  # Retrieve settings with defaults
   eps_val <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
+  input_fmt <- if(!is.null(config$input_format)) config$input_format else "percentage"
   
-  message(sprintf("\n[CoDa] Starting Hybrid Strategy (%s mode)...", mode))
+  message(sprintf("\n[CoDa] Starting Hybrid Strategy (%s mode). Input Format: %s...", mode, input_fmt))
   
   rn_safe <- rownames(mat_raw)
-  if (is.null(rn_safe)) stop("[FATAL] Input matrix 'mat_raw' lacks rownames (Patient IDs).")
-  
   all_current_markers <- colnames(mat_raw)
+  
+  # Define Tracks
   comp_markers_list <- unique(unlist(config$hybrid_groups))
   comp_markers <- intersect(all_current_markers, comp_markers_list)
   func_markers <- setdiff(all_current_markers, comp_markers)
+  
   if (length(func_markers) > 0) {
-    message(paste("[CoDa] The following markers will be considered as Functional (Logit):", 
-                  paste(func_markers, collapse=", ")))
+    message(paste("[CoDa] Functional Markers (Logit Track):", paste(func_markers, collapse=", ")))
   }
   
   mat_comp_trans <- NULL
@@ -364,7 +386,7 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
     if (mode == "complete") message("   [Track A] Processing Compositional Groups (CZM -> CLR)...")
     mat_comp_raw <- mat_raw[, comp_markers, drop = FALSE]
     
-    # Drop 100% NA cols
+    # Remove 100% NA columns
     na_counts <- colSums(is.na(mat_comp_raw))
     empty_cols <- which(na_counts == nrow(mat_comp_raw))
     if (length(empty_cols) > 0) {
@@ -373,19 +395,20 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
     
     if (ncol(mat_comp_raw) == 1) {
       message(sprintf("   [CoDa] Group reduced to 1 marker (%s). Moving to Functional Track.", colnames(mat_comp_raw)))
-      # Move to func markers and skip Track A
-      mat_func_raw <- cbind(mat_func_raw, mat_comp_raw) 
-      
+      # Move marker to functional track dynamically
+      func_markers <- c(func_markers, colnames(mat_comp_raw))
       mat_comp_trans <- NULL 
     } else if (ncol(mat_comp_raw) > 0) {
       if (mode == "complete") {
+        # CZM handles zeros. It works on counts/proportions. 
+        # Since CLR deals with ratios, 0-100 scale is mathematically fine here.
         mat_comp_clean <- coda_replace_zeros(mat_comp_raw)
         if (any(is.na(mat_comp_clean))) {
           mat_comp_clean <- impute_nas_simple(mat_comp_clean)
         }
       } else {
         mat_comp_clean <- mat_comp_raw
-        mat_comp_clean[mat_comp_clean <= 0 | is.na(mat_comp_clean)] <- eps_val # Use config epsilon
+        mat_comp_clean[mat_comp_clean <= 0 | is.na(mat_comp_clean)] <- eps_val
       }
       rownames(mat_comp_clean) <- rn_safe 
       
@@ -398,10 +421,14 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
   }
   
   # --- TRACK B: Functional Markers (Logit) ---
+  # Re-evaluate markers in case some moved from Track A
+  func_markers <- intersect(func_markers, colnames(mat_raw)) 
+  
   if (length(func_markers) > 0) {
     if (mode == "complete") message("   [Track B] Processing Functional Markers (LOD -> Logit -> BPCA)...")
     mat_func_raw <- mat_raw[, func_markers, drop = FALSE]
     
+    # Remove 100% NA columns
     na_counts <- colSums(is.na(mat_func_raw))
     empty_cols <- which(na_counts == nrow(mat_func_raw))
     if (length(empty_cols) > 0) {
@@ -411,27 +438,32 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
     if (ncol(mat_func_raw) > 0) {
       mat_func_lod <- mat_func_raw
       
+      # Handle Zeros / LOD 
+      # Note: We apply LOD replacement based on the raw scale provided
       if (mode == "complete") {
         mins <- apply(mat_func_lod, 2, function(x) {
           pos <- x[x > 0 & !is.na(x)]
-          if(length(pos) > 0) min(pos)/2 else eps_val # Use config epsilon
+          # Safety for empty/all-zero cols
+          if(length(pos) == 0) return(eps_val)
+          return(min(pos) / 2)
         })
         for (j in 1:ncol(mat_func_lod)) {
           zeros <- which(mat_func_lod[, j] == 0 & !is.na(mat_func_lod[, j]))
           if (length(zeros) > 0) mat_func_lod[zeros, j] <- mins[j]
         }
       } else {
-        mat_func_lod[mat_func_lod <= 0] <- eps_val # Use config epsilon
+        # Fast mode: just clamp
+        mat_func_lod[mat_func_lod <= 0] <- eps_val 
       }
       
-      # Pass epsilon to the transformation function
-      mat_func_logit <- coda_transform_logit(mat_func_lod, epsilon = eps_val, input_type = "percentage")
+      # Apply Logit with explicit scale handling
+      mat_func_logit <- coda_transform_logit(
+        mat = mat_func_lod, 
+        epsilon = eps_val, 
+        input_type = input_fmt # Passed from config
+      )
       
       if (mode == "complete") {
-        if (any(colSums(!is.na(mat_func_logit)) == 0)) {
-          stop("[FATAL] Functional matrix has empty columns after Logit.")
-        }
-        
         seed_val <- if(!is.null(config$stats$seed)) config$stats$seed else 123
         mat_func_trans <- impute_matrix_bpca(mat_func_logit, nPcs = "auto", seed = seed_val)
       } else {
@@ -453,7 +485,7 @@ perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
   
   mat_hybrid_z <- NULL
   if (mode == "complete") {
-    message("   [Norm] Applying Global Z-Score Standardization...")
+    # Z-Score Standardization (Important: scales Track A and Track B to comparable variance)
     mat_hybrid_z <- scale(mat_hybrid_raw)
     attr(mat_hybrid_z, "scaled:center") <- NULL
     attr(mat_hybrid_z, "scaled:scale") <- NULL
