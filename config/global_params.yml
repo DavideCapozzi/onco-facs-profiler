@@ -5,7 +5,7 @@
 # --- Setup ---
 output_root: "results"
 project_name: "longsurvivors"
-input_file: "/mnt/c/Users/Davide/Desktop/Davide/bandi/0dottorato/projects/long survivors/DB_standardizzatov4_anonimo.xlsx"
+input_file: "/mnt/c/Users/Davide/Desktop/dottorato/projects/long survivors/DB_standardizzatov4_anonimo.xlsx"
 input_format: "percentage"  # Options: "percentage" (0-100) or "proportion" (0-1)
 
 # --- ANALYSIS TARGETS ---
@@ -18,21 +18,21 @@ case_groups: ["HNSCC_EP", "NSCLC_EP", "NSCLC_LS", "HNSCC_LS"]
 # Each item here triggers a full analysis cycle (Hypothesis -> Multivariate -> Network)
 analysis_scenarios:
   - id: "01_Benchmark_Disease"
-    description: "Characterizing the disease signature (All Cancer vs Healthy)"
+    description: "Characterizing the disease signature"
     case_label: "Total_Cancer"
     case_groups: ["HNSCC_EP", "NSCLC_EP"]
     control_label: "Healthy_Ref"
     control_groups: ["Healthy_Donors"]
     
   - id: "02_Normalization_Check"
-    description: "Checking if Long Survivors return to homeostasis"
+    description: "Checking if Long Survivors return to healthy phenotype"
     case_label: "Total_LS"
     case_groups: ["HNSCC_LS", "NSCLC_LS"]
     control_label: "Healthy_Ref"
     control_groups: ["Healthy_Donors"]
     
   - id: "03_Resistance_Mechanism"
-    description: "Identifying resistance features (LS vs Progressors)"
+    description: "Identifying resistance features (Long survivors vs Early Progressors)"
     case_label: "Total_LS"
     case_groups: ["HNSCC_LS", "NSCLC_LS"]
     control_label: "Total_Cancer"

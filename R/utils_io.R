@@ -182,8 +182,34 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     df_parent[[col_name]] <- aggregate_metrics(subs_in_parent)
   }
   
-  # --- Table 3: By Group Dropping Metrics (Aggregated Control vs Case) ---
+  # --- Table 3: By Clinical Status (EP vs LS) ---
+  ep_subgroups <- grep("_EP$", all_subgroups, value = TRUE)
+  ls_subgroups <- grep("_LS$", all_subgroups, value = TRUE)
+  
+  # Define logic for controls (assuming "Healthy" or "Control" in name)
   is_control_func <- function(g_name) grepl("Healthy|Control", g_name, ignore.case = TRUE)
+  ctrl_subgroups <- all_subgroups[sapply(all_subgroups, is_control_func)]
+  
+  df_clinical <- data.frame(Metric = metrics_summary, Total = c(total_init, total_dropped_combined, total_final), stringsAsFactors = FALSE)
+  
+  # Column: Healthy_Donors_tot (or similar control group)
+  if(length(ctrl_subgroups) > 0) {
+    # We use the parent name from mapping if possible for cleaner header, otherwise "Control_tot"
+    ctrl_header <- "Healthy_Donors_tot" 
+    df_clinical[[ctrl_header]] <- aggregate_metrics(ctrl_subgroups)
+  }
+  
+  # Column: EP_tot
+  if(length(ep_subgroups) > 0) {
+    df_clinical[["EP_tot"]] <- aggregate_metrics(ep_subgroups)
+  }
+  
+  # Column: LS_tot
+  if(length(ls_subgroups) > 0) {
+    df_clinical[["LS_tot"]] <- aggregate_metrics(ls_subgroups)
+  }
+  
+  # --- Table 4: By Group Dropping Metrics (Aggregated Control vs Case) ---
   ctrl_parents <- unique_parents[sapply(unique_parents, is_control_func)]
   case_parents <- unique_parents[!sapply(unique_parents, is_control_func)]
   
@@ -208,17 +234,7 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   # 3. Writing to Excel
   curr_row <- 1
   
-  # Section 1: Detailed Dropped Metrics
-  writeData(wb, "Summary", "DETAILED DROPPED METRICS:", startRow = curr_row)
-  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
-  curr_row <- curr_row + 1
-  
-  writeData(wb, "Summary", df_detailed, startRow = curr_row)
-  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_detailed), gridExpand = TRUE)
-  
-  curr_row <- curr_row + nrow(df_detailed) + 2 
-  
-  # Section 2: By Group Dropping Metrics (Parent Level)
+  # Section 1: By Group Dropping Metrics (Parent Level)
   writeData(wb, "Summary", "BY GROUP DROPPING METRICS:", startRow = curr_row)
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
   curr_row <- curr_row + 1
@@ -227,6 +243,16 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_parent), gridExpand = TRUE)
   
   curr_row <- curr_row + nrow(df_parent) + 2
+  
+  # Section 2: By Clinical Status (EP vs LS)
+  writeData(wb, "Summary", "BY CLINICAL STATUS METRICS (EP vs LS):", startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
+  curr_row <- curr_row + 1
+  
+  writeData(wb, "Summary", df_clinical, startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_clinical), gridExpand = TRUE)
+  
+  curr_row <- curr_row + nrow(df_clinical) + 2
   
   # Section 3: By Group Dropping Metrics (Aggregated)
   writeData(wb, "Summary", "BY GROUP DROPPING METRICS (AGGREGATED):", startRow = curr_row)
@@ -238,7 +264,17 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   
   curr_row <- curr_row + nrow(df_macro) + 2
   
-  # Section 4: Markers Metrics
+  # Section 4: Detailed Dropped Metrics
+  writeData(wb, "Summary", "DETAILED DROPPED METRICS:", startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1)
+  curr_row <- curr_row + 1
+  
+  writeData(wb, "Summary", df_detailed, startRow = curr_row)
+  addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_detailed), gridExpand = TRUE)
+  
+  curr_row <- curr_row + nrow(df_detailed) + 2 
+  
+  # Section 5: Markers Metrics
   n_markers_apriori <- if(!is.null(qc_list$dropped_markers_apriori)) nrow(qc_list$dropped_markers_apriori) else 0
   totals_markers <- c(qc_list$n_col_init,
                       n_markers_apriori,
@@ -255,7 +291,7 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   addStyle(wb, "Summary", createStyle(textDecoration = "bold"), rows = curr_row, cols = 1:ncol(df_markers), gridExpand = TRUE)
   curr_row <- curr_row + nrow(df_markers) + 2 
   
-  # Section 5: Final Markers List
+  # Section 6: Final Markers List
   if (!is.null(qc_list$final_markers_names) && length(qc_list$final_markers_names) > 0) {
     final_mks <- qc_list$final_markers_names
     formatted_df <- NULL

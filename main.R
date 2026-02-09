@@ -20,13 +20,13 @@ suppressPackageStartupMessages({
 options(crayon.enabled = FALSE)
 
 # Load Configuration
-config_path <- "config/global_params.yml"
+config_path <- here("config/global_params.yml")
 if (!file.exists(config_path)) stop("Config file not found!")
 config <- yaml::read_yaml(config_path)
 
 # 2. Logging Setup
 # ------------------------------------------------------------------------------
-out_root <- config$output_root
+out_root <- here(config$output_root)
 if (!is.null(config$project_name) && config$project_name != "") {
   out_root <- paste0(out_root, "_", config$project_name)
 }
@@ -58,24 +58,24 @@ tryCatch({
     
     # --- Module Loading ---
     message("\n>>> LOADING MODULES <<<")
-    list.files("R", pattern = "\\.R$", full.names = TRUE) %>% walk(source)
+    list.files(here("R"), pattern = "\\.R$", full.names = TRUE) %>% walk(source)
     message("[System] Modules loaded successfully.")
     
     # --- PHASE 1: DATA PROCESSING & VIZ ---
     message("\n>>> RUNNING PHASE 1: DATA PROCESSING & VIZ <<<")
     
     # Sourcing these files executes the steps immediately
-    source("src/01_data_processing.R", echo = FALSE)
-    source("src/02_visualization.R", echo = FALSE)
+    source(here("src/01_data_processing.R"), echo = FALSE)
+    source(here("src/02_visualization.R"), echo = FALSE)
     
     # --- PHASE 2: COMPARATIVE ANALYSIS (SCENARIOS) ---
     message("\n>>> RUNNING PHASE 2: COMPARATIVE ANALYSIS (SCENARIOS) <<<")
     
-    data_file <- file.path(config$output_root, "01_data_processing", "data_processed.rds")
+    data_file <- file.path(here(config$output_root), "01_data_processing", "data_processed.rds")
     if (!file.exists(data_file)) stop("CRITICAL: Processed data not found.")
     processed_data <- readRDS(data_file)
     
-    results_root <- file.path(config$output_root, "results_analysis")
+    results_root <- file.path(here(config$output_root), "results_analysis")
     if (!dir.exists(results_root)) dir.create(results_root, recursive = TRUE)
     
     if (is.null(config$analysis_scenarios) || length(config$analysis_scenarios) == 0) {
