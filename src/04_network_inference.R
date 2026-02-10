@@ -81,7 +81,6 @@ message("[Inference] Running Global Robust Network Analysis...")
 
 n_cores_req <- if(config$stats$n_cores == "auto") parallel::detectCores() - 1 else config$stats$n_cores
 
-# Chiamata alla funzione aggiornata
 diff_res <- run_differential_network(
   mat_ctrl = mat_ctrl,
   mat_case = mat_case,
