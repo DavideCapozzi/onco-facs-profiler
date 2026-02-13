@@ -38,6 +38,8 @@ dependencies:
   - r-psych
   - r-fdrtool
   - r-networkcomparisontest 
+  - r-ggvenndiagram
+
 
   # === CORE COMPOSITIONALITY PACKAGES ===
   - bioconductor-aldex2       

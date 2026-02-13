@@ -227,6 +227,35 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         dev.off()
         message("      [Viz] Network plots saved: Plot_Networks.pdf")
       }
+      
+      # Automatically generate Cytoscape files for this scenario
+      message("      [Export] Generating Rich Cytoscape Tables...")
+      cyto_dir <- file.path(out_dir, "cytoscape_export")
+      if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
+      
+      # Control Group Export
+      if (sum(net_res$stability$ctrl) > 0) {
+        tbl_ctrl <- get_rich_network_table(
+          net_res$stability$ctrl, 
+          net_res$networks$ctrl, 
+          group_label = scenario$control_label
+        )
+        if (!is.null(tbl_ctrl)) {
+          write.csv(tbl_ctrl, file.path(cyto_dir, paste0(scenario$control_label, "_RichTable.csv")), row.names = FALSE)
+        }
+      }
+      
+      # Case Group Export
+      if (sum(net_res$stability$case) > 0) {
+        tbl_case <- get_rich_network_table(
+          net_res$stability$case, 
+          net_res$networks$case, 
+          group_label = scenario$case_label
+        )
+        if (!is.null(tbl_case)) {
+          write.csv(tbl_case, file.path(cyto_dir, paste0(scenario$case_label, "_RichTable.csv")), row.names = FALSE)
+        }
+      }
     }
   }, error = function(e) {
     message(sprintf("      [Fail] Network Inference failed: %s", e$message))

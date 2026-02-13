@@ -787,3 +787,105 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
   
   return(p)
 }
+
+#' @title Plot Differential Edge Overlap (Venn / UpSet)
+#' @description 
+#' Visualizes the intersection of differential edges across scenarios.
+#' Uses ggVennDiagram for <= 3 sets and UpSet plots for > 3 sets.
+#' 
+#' @param edge_list A named list of character vectors (Edge IDs).
+#' @param fill_colors Named vector of colors corresponding to names(edge_list).
+#' @param title Plot title.
+#' @return Returns the plot object.
+viz_plot_differential_overlap <- function(edge_list, fill_colors = NULL, title = "Differential Overlap") {
+  
+  # Silently load required packages to reduce log verbosity
+  suppressPackageStartupMessages({
+    requireNamespace("ComplexHeatmap", quietly = TRUE)
+    requireNamespace("grid", quietly = TRUE)
+    requireNamespace("ggVennDiagram", quietly = TRUE)
+    requireNamespace("ggplot2", quietly = TRUE)
+  })
+  
+  if (length(edge_list) < 2) {
+    warning("[Viz] Need at least 2 sets for overlap analysis.")
+    return(NULL)
+  }
+  
+  # --- Prepare Colors (Preserved Logic) ---
+  final_colors <- NULL
+  if (!is.null(fill_colors)) {
+    common_names <- intersect(names(edge_list), names(fill_colors))
+    if (length(common_names) > 0) {
+      final_colors <- fill_colors[names(edge_list)]
+      final_colors[is.na(final_colors)] <- "grey80" 
+    }
+  }
+  
+  # Default colors if mapping fails or not provided
+  if (is.null(final_colors)) {
+    defaults <- c("#4682B4", "#CD5C5C", "#E7B800", "#2E8B57", "#9932CC")
+    n_needed <- length(edge_list)
+    final_colors <- rep_len(defaults, n_needed)
+    names(final_colors) <- names(edge_list)
+  }
+  
+  # --- LOGIC: VENN (<= 3 sets) vs UPSET (> 3 sets) ---
+  if (length(edge_list) <= 3) {
+    
+    # Use suppressMessages to avoid internal ggVennDiagram styling logs
+    suppressMessages({
+      # 1. Generate base Venn
+      # set_color defines the circle outlines. label_alpha=0 removes label background.
+      p <- ggVennDiagram::ggVennDiagram(edge_list, label_alpha = 0, set_color = "black") +
+        
+        # 2. Visualization Overrides (User Request: No Gradient, Fix Labels)
+        # Force fill to white to remove the "heatmap" effect based on counts
+        ggplot2::scale_fill_gradient(low = "white", high = "white") +
+        
+        # Remove the legend since fill is now meaningless
+        ggplot2::theme(legend.position = "none") +
+        
+        # Add title and format
+        ggplot2::labs(title = title) +
+        ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")) +
+        
+        # 3. Fix Label Cutoff
+        # Expand x-axis by 20% on both sides to accommodate long category names
+        ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.2))
+    })
+    
+    # Explicitly render
+    print(p)
+    return(p)
+    
+  } else {
+    
+    message("   [Viz] Drawing UpSet Plot (> 3 sets)...")
+    
+    # Create Combination Matrix
+    m_comb <- ComplexHeatmap::make_comb_mat(edge_list)
+    
+    # Draw UpSet using ComplexHeatmap
+    p <- ComplexHeatmap::draw(
+      ComplexHeatmap::UpSet(
+        m_comb,
+        set_order = names(edge_list),
+        comb_order = order(ComplexHeatmap::comb_size(m_comb), decreasing = TRUE),
+        pt_size = unit(3, "mm"), 
+        lwd = 2,
+        top_annotation = ComplexHeatmap::HeatmapAnnotation(
+          "Intersection" = ComplexHeatmap::anno_barplot(
+            ComplexHeatmap::comb_size(m_comb), 
+            border = FALSE, 
+            gp = grid::gpar(fill = "black"), 
+            height = unit(4, "cm")
+          ), 
+          annotation_name_side = "left"
+        ),
+        column_title = title
+      )
+    )
+    return(p)
+  }
+}

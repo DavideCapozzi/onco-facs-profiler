@@ -282,3 +282,70 @@ export_cytoscape_edges <- function(adj_mat, weight_mat) {
     dplyr::rename(Source = from, Target = to) %>%
     ungroup()
 }
+
+#' @title Calculate Topology and Export Rich Cytoscape Table
+#' @description 
+#' Calculates node topology metrics and merges them into the edge list.
+#' Creates a single "Rich Table" for Cytoscape (One-click import).
+#' 
+#' @param adj_mat Adjacency matrix (0/1).
+#' @param weight_mat Partial correlation matrix.
+#' @param group_label Label for the group (e.g., "Healthy", "LS").
+#' @return A dataframe compatible with Cytoscape import.
+get_rich_network_table <- function(adj_mat, weight_mat, group_label = "Unknown") {
+  
+  requireNamespace("igraph", quietly = TRUE)
+  requireNamespace("dplyr", quietly = TRUE)
+  
+  # 1. Check if network is empty
+  if (sum(adj_mat) == 0) return(NULL)
+  
+  # 2. Build Graph & Calculate Topology
+  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
+  
+  # Calculate Metrics
+  node_metrics <- data.frame(
+    Node = igraph::V(g)$name,
+    Degree = igraph::degree(g),
+    Betweenness = igraph::betweenness(g, normalized = TRUE),
+    Closeness = igraph::closeness(g, normalized = TRUE),
+    Eigen_Centrality = igraph::eigen_centrality(g)$vector,
+    stringsAsFactors = FALSE
+  )
+  
+  # 3. Build Edge List
+  edge_list <- igraph::as_data_frame(g, what = "edges")
+  
+  # 4. Merge Logic (The "Rich" Table)
+  # We join node metrics TWICE: once for Source, once for Target
+  rich_table <- edge_list %>%
+    rowwise() %>%
+    mutate(
+      Weight = weight_mat[from, to],
+      Abs_Weight = abs(Weight),
+      Sign = ifelse(Weight > 0, "Positive", "Negative"),
+      Interaction = ifelse(Weight > 0, "Co-occurrence", "Mutual-Exclusion"),
+      Group_ID = group_label
+    ) %>%
+    ungroup() %>%
+    # Join Source Metrics
+    left_join(node_metrics, by = c("from" = "Node")) %>%
+    dplyr::rename(
+      Source = from, 
+      Source_Degree = Degree, 
+      Source_Betweenness = Betweenness,
+      Source_Closeness = Closeness
+    ) %>%
+    # Join Target Metrics
+    left_join(node_metrics, by = c("to" = "Node")) %>%
+    dplyr::rename(
+      Target = to, 
+      Target_Degree = Degree, 
+      Target_Betweenness = Betweenness,
+      Target_Closeness = Closeness
+    ) %>%
+    # Cleanup auxiliary columns from join if any
+    select(-matches("Eigen_Centrality")) # Optional: keep or remove based on preference
+  
+  return(rich_table)
+}
