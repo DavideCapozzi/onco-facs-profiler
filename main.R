@@ -111,8 +111,33 @@ tryCatch({
         
         wb_master <- createWorkbook()
         
-        # A. Global Drivers
-        combined_drivers <- map_dfr(all_results, ~ .x$drivers, .id = "Scenario")
+        # A. Global Drivers (Standardized Summary)
+        # Process each scenario to standardize column names before merging
+        combined_drivers_list <- lapply(names(all_results), function(scen_id) {
+          res <- all_results[[scen_id]]
+          if (is.null(res$drivers) || nrow(res$drivers) == 0) return(NULL)
+          
+          df <- res$drivers
+          df$Scenario <- scen_id 
+          
+          # Standardize columns: Rename dynamic weights to generic and drop redundancy
+          df_clean <- df %>%
+            dplyr::rename_with(
+              .fn = ~ "Weight_Case_VS_Control_PC1", 
+              .cols = dplyr::matches("^Weight_.*_PC1$")
+            ) %>%
+            dplyr::rename_with(
+              .fn = ~ "Weight_Case_VS_Control_PC2", 
+              .cols = dplyr::matches("^Weight_.*_PC2$")
+            ) %>%
+            # Select strict column set to remove redundancy (Importance, Direction)
+            dplyr::select(Scenario, Marker, dplyr::matches("^Weight_Case_VS_Control_PC[12]$"))
+          
+          return(df_clean)
+        })
+        
+        combined_drivers <- dplyr::bind_rows(combined_drivers_list)
+        
         if (nrow(combined_drivers) > 0) {
           addWorksheet(wb_master, "All_Drivers_Summary")
           writeData(wb_master, "All_Drivers_Summary", combined_drivers)

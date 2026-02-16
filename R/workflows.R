@@ -153,11 +153,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             group_col = "Analysis_Group"
           )
           
-          # --- MODIFICA: Rinomina colonne pesi con nomi gruppi dinamici ---
-          # Costruisco etichetta contrasto: es. "Total_Cancer_vs_Healthy_Ref"
-          contrast_lbl <- paste0(scenario$case_label, "_vs_", scenario$control_label)
+          # --- DYNAMIC RENAMING (Drivers) ---
+          contrast_lbl <- paste0(scenario$case_label, "_VS_", scenario$control_label)
           
-          # Rinomina Comp1 e Comp2 (se esiste) usando dplyr::rename_with per sicurezza
           spls_drivers <- spls_drivers %>%
             dplyr::rename_with(
               .fn = ~ paste0("Weight_", contrast_lbl, "_PC1"), 
@@ -167,7 +165,6 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
               .fn = ~ paste0("Weight_", contrast_lbl, "_PC2"), 
               .cols = dplyr::matches("^Comp2_Weight$")
             )
-          # ----------------------------------------------------------------
         }
       }
     }, error = function(e) {
@@ -204,7 +201,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         seed = seed_cfg,
         n_cores = n_cores_cfg,
         fdr_thresh = fdr_cfg,
-        stability_thresh = 0.8 
+        stability_thresh = 0.8,
+        label_ctrl = scenario$control_label,
+        label_case = scenario$case_label
       )
       
       # --- NETWORK VISUALIZATION ---

@@ -118,10 +118,13 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
 #' @param n_cores Number of cores.
 #' @param fdr_thresh FDR threshold.
 #' @param stability_thresh Frequency threshold to keep an edge (e.g., 0.8 = 80%).
+#' @param label_ctrl Label for control group (used for dynamic column naming).
+#' @param label_case Label for case group (used for dynamic column naming).
 #' @return List with edge table and network objects.
 run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
                                      seed = 123, n_cores = 1, fdr_thresh = 0.1, 
-                                     stability_thresh = 0.8) {
+                                     stability_thresh = 0.8,
+                                     label_ctrl = "Ctrl", label_case = "Case") {
   
   requireNamespace("parallel", quietly = TRUE)
   requireNamespace("doParallel", quietly = TRUE)
@@ -132,6 +135,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   
   # Setup Cluster
   cl <- parallel::makeCluster(n_cores)
+  # SAFETY: Ensure cluster is stopped even if code crashes
   on.exit({
     if(!is.null(cl)) {
       try(parallel::stopCluster(cl), silent=TRUE)
@@ -140,20 +144,18 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   
   doParallel::registerDoParallel(cl)
   parallel::clusterEvalQ(cl, { library(corpcor) })
-  # Esporta le funzioni necessarie ai worker
   parallel::clusterExport(cl, varlist = c("infer_network_pcor", "boot_worker_pcor"), envir = environment())
   parallel::clusterSetRNGStream(cl, seed)
   
   # --- STEP 1: BOOTSTRAP (Stability) ---
   message("      [DiffNet] 1/3 Running Bootstrap Stability...")
   
-  # Helper interno per eseguire il bootstrap su una matrice
+  # Helper internal function
   run_boot_internal <- function(mat, n_b) {
     n_samp <- nrow(mat)
     res_list <- foreach::foreach(i = 1:n_b, .packages = "corpcor") %dopar% {
       boot_worker_pcor(mat, n_samp, lambda_val = NULL)
     }
-    # Rimuovi NULL (iterazioni fallite)
     Filter(Negate(is.null), res_list)
   }
   
@@ -164,17 +166,16 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   agg_ctrl <- aggregate_boot_results(boots_ctrl, alpha = 0.05)
   agg_case <- aggregate_boot_results(boots_case, alpha = 0.05)
   
-  check_boot_yield(agg_ctrl, n_boot, "Control")
+  check_boot_yield(agg_ctrl, n_boot, "Ctrl")
   check_boot_yield(agg_case, n_boot, "Case")
   
-  # Stability mask: Edge is counted for test correction if its stable in at least one group
+  # Stability mask
   stable_mask <- (agg_ctrl$adj == 1 | agg_case$adj == 1)
   
   n_stable_edges <- sum(stable_mask[upper.tri(stable_mask)])
   message(sprintf("      [DiffNet] Found %d stable edges (union of groups).", n_stable_edges))
   
   if (n_stable_edges == 0) {
-    parallel::stopCluster(cl)
     return(list(edges_table = data.frame(), networks = list()))
   }
   
@@ -183,7 +184,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   obs_case <- infer_network_pcor(mat_case, fixed_lambda = NULL)
   obs_diff <- abs(obs_ctrl - obs_case)
   
-  # --- STEP 3: PERMUTATION TEST (Only on Stable Edges logic) ---
+  # --- STEP 3: PERMUTATION TEST ---
   message("      [DiffNet] 2/3 Running Permutation Test...")
   
   pool_mat <- rbind(mat_ctrl, mat_case)
@@ -200,9 +201,6 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
     abs(r1 - r2)
   }
-  
-  parallel::stopCluster(cl)
-  foreach::registerDoSEQ()
   
   # --- STEP 4: P-VALUE & FDR ---
   message("      [DiffNet] 3/3 calculating statistics...")
@@ -238,11 +236,16 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     
     res_df <- do.call(rbind, results_list)
     
-    # FDR Correction (Only on stable edges)
     res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
     res_df$Significant <- res_df$FDR < fdr_thresh
-    
     res_df <- res_df[order(res_df$P_Value), ]
+    
+    # --- DYNAMIC RENAMING ---
+    colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Weight_", label_ctrl)
+    colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Weight_", label_case)
+    colnames(res_df)[colnames(res_df) == "Is_Stable_Ctrl"] <- paste0("Is_Stable_", label_ctrl)
+    colnames(res_df)[colnames(res_df) == "Is_Stable_Case"] <- paste0("Is_Stable_", label_case)
+    
   } else {
     res_df <- data.frame()
   }
