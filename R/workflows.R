@@ -152,6 +152,22 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             out_path = file.path(out_dir, "Plot_sPLSDA.pdf"),
             group_col = "Analysis_Group"
           )
+          
+          # --- MODIFICA: Rinomina colonne pesi con nomi gruppi dinamici ---
+          # Costruisco etichetta contrasto: es. "Total_Cancer_vs_Healthy_Ref"
+          contrast_lbl <- paste0(scenario$case_label, "_vs_", scenario$control_label)
+          
+          # Rinomina Comp1 e Comp2 (se esiste) usando dplyr::rename_with per sicurezza
+          spls_drivers <- spls_drivers %>%
+            dplyr::rename_with(
+              .fn = ~ paste0("Weight_", contrast_lbl, "_PC1"), 
+              .cols = dplyr::matches("^Comp1_Weight$")
+            ) %>%
+            dplyr::rename_with(
+              .fn = ~ paste0("Weight_", contrast_lbl, "_PC2"), 
+              .cols = dplyr::matches("^Comp2_Weight$")
+            )
+          # ----------------------------------------------------------------
         }
       }
     }, error = function(e) {

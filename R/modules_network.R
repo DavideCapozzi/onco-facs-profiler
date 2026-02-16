@@ -132,6 +132,12 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   
   # Setup Cluster
   cl <- parallel::makeCluster(n_cores)
+  on.exit({
+    if(!is.null(cl)) {
+      try(parallel::stopCluster(cl), silent=TRUE)
+    }
+  }, add = TRUE)
+  
   doParallel::registerDoParallel(cl)
   parallel::clusterEvalQ(cl, { library(corpcor) })
   # Esporta le funzioni necessarie ai worker
@@ -246,41 +252,6 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     networks = list(ctrl = obs_ctrl, case = obs_case),
     stability = list(ctrl = agg_ctrl$adj, case = agg_case$adj)
   ))
-}
-
-#' @title Calculate Topology Metrics
-get_topology_metrics <- function(adj_mat, weight_mat) {
-  requireNamespace("igraph", quietly = TRUE)
-  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
-  if (igraph::vcount(g) == 0) return(NULL)
-  
-  data.frame(
-    Node = igraph::V(g)$name,
-    Degree = igraph::degree(g),
-    Betweenness = igraph::betweenness(g, normalized = TRUE),
-    Closeness = igraph::closeness(g, normalized = TRUE),
-    Eigen_Centrality = igraph::eigen_centrality(g)$vector,
-    stringsAsFactors = FALSE
-  )
-}
-
-#' @title Export Edges for Cytoscape
-export_cytoscape_edges <- function(adj_mat, weight_mat) {
-  requireNamespace("igraph", quietly = TRUE)
-  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
-  edge_list <- igraph::as_data_frame(g, what = "edges")
-  
-  if (nrow(edge_list) == 0) return(data.frame())
-  
-  edge_list %>%
-    rowwise() %>%
-    mutate(
-      Weight = weight_mat[from, to],
-      Interaction = ifelse(Weight > 0, "Co-occurrence", "Mutual-Exclusion"),
-      Abs_Weight = abs(Weight)
-    ) %>%
-    dplyr::rename(Source = from, Target = to) %>%
-    ungroup()
 }
 
 #' @title Calculate Topology and Export Rich Cytoscape Table

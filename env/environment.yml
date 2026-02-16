@@ -1,4 +1,4 @@
-name: facs-comp-analysis
+name: onco-facs-profiler
 
 channels:
   - conda-forge

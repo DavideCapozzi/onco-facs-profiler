@@ -66,6 +66,13 @@ hybrid_groups:
 metadata:
   subgroup_col: "Original_Source"
 
+# --- Quality Control ---
+qc:
+  max_na_row_pct: 0.45   
+  max_na_col_pct: 0.20  
+  remove_outliers: true
+  outlier_conf_level: 0.99
+
 # QC Reporting Configuration
 qc_reporting:
   marker_categories:
@@ -124,6 +131,18 @@ qc_reporting:
       - "M-MDSC"
       - "LOX1-PMN-MDSC"
 
+# --- Imputation (CoDa) ---
+imputation:   
+  epsilon: 0.000001
+
+# --- Multivariate & Interpretation ---
+multivariate:
+  run_plsda: true
+  n_comp: 2           
+  validation_folds: 5 
+  n_repeat_cv: 50
+  top_n_loadings: 15  
+  
 # --- VISUALS & COLORS ---
 colors:
   # Palette for generic case mapping if specific names are not found below
@@ -162,25 +181,6 @@ viz:
   heatmap_metadata: ["Group", "Original_Source"]
   merge_case_groups: false
   highlight_pattern: "_LS"
-
-# --- Quality Control ---
-qc:
-  max_na_row_pct: 0.45   
-  max_na_col_pct: 0.20  
-  remove_outliers: true
-  outlier_conf_level: 0.99
-
-# --- Imputation (CoDa) ---
-imputation:   
-  epsilon: 0.000001
-
-# --- Multivariate & Interpretation ---
-multivariate:
-  run_plsda: true
-  n_comp: 2           
-  validation_folds: 5 
-  n_repeat_cv: 50
-  top_n_loadings: 15  
 
 # --- Inference Statistics ---
 stats:
