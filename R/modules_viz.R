@@ -889,3 +889,56 @@ viz_plot_differential_overlap <- function(edge_list, fill_colors = NULL, title =
     return(p)
   }
 }
+
+#' @title Plot Hub-Driver Quadrant
+#' @description 
+#' Scatter plot of PLS-DA Importance vs Network Centrality.
+#' 
+#' @param hub_driver_df Output from integrate_hub_drivers.
+#' @param title_suffix String to append to title.
+#' @return ggplot object.
+plot_hub_driver_quadrant <- function(hub_driver_df, title_suffix = "") {
+  
+  require(ggplot2)
+  require(ggrepel)
+  
+  if (is.null(hub_driver_df) || nrow(hub_driver_df) == 0) return(NULL)
+  
+  # Define Quadrant Lines
+  x_mid <- median(hub_driver_df$Importance, na.rm = TRUE)
+  y_mid <- median(hub_driver_df$Degree, na.rm = TRUE)
+  
+  p <- ggplot(hub_driver_df, aes(x = Importance, y = Degree, fill = Role)) +
+    # Quadrant Lines
+    geom_vline(xintercept = x_mid, linetype = "dashed", color = "gray60") +
+    geom_hline(yintercept = y_mid, linetype = "dashed", color = "gray60") +
+    
+    # Points
+    geom_point(size = 4, shape = 21, alpha = 0.8) +
+    
+    # Labels
+    geom_text_repel(aes(label = Marker), size = 3.5, max.overlaps = 20) +
+    
+    # Colors
+    scale_fill_manual(values = c(
+      "Master_Regulator" = "#B2182B",      # Red (High/High)
+      "Solo_Driver" = "#D6604D",           # Light Red (High/Low)
+      "Structural_Connector" = "#2166AC",  # Blue (Low/High)
+      "Background" = "gray80"              # Gray (Low/Low)
+    )) +
+    
+    # Scales
+    scale_y_continuous(breaks = scales::pretty_breaks()) +
+    
+    labs(
+      title = paste("Hub-Driver Analysis", title_suffix),
+      subtitle = "Integration of Multivariate (sPLS-DA) and Network (Degree) Metrics",
+      x = "Statistical Importance (sPLS-DA)",
+      y = "Topological Centrality (Degree)",
+      caption = "Quadrants defined by median values"
+    ) +
+    theme_coda() +
+    theme(legend.position = "bottom")
+  
+  return(p)
+}

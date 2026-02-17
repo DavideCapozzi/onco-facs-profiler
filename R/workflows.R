@@ -206,6 +206,79 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         label_case = scenario$case_label
       )
       
+      # --- ADVANCED INTEGRATION & EXPORT ---
+      if (!is.null(net_res)) {
+        
+        # Define output path
+        topo_xlsx_path <- file.path(out_dir, paste0(scenario$id, "_Topology_Metrics.xlsx"))
+        message(sprintf("      [Export] Generating Advanced Topology Report: %s", basename(topo_xlsx_path)))
+        
+        wb_topo <- createWorkbook()
+        has_topo_data <- FALSE
+        
+        # 1. Basic Topology (Control & Case)
+        topo_ctrl <- NULL
+        if (sum(net_res$stability$ctrl) > 0) {
+          topo_ctrl <- calculate_node_topology(net_res$stability$ctrl)
+          if (!is.null(topo_ctrl)) {
+            addWorksheet(wb_topo, "Topology_Control")
+            writeData(wb_topo, "Topology_Control", topo_ctrl)
+            has_topo_data <- TRUE
+          }
+        }
+        
+        topo_case <- NULL
+        if (sum(net_res$stability$case) > 0) {
+          topo_case <- calculate_node_topology(net_res$stability$case)
+          if (!is.null(topo_case)) {
+            addWorksheet(wb_topo, "Topology_Case")
+            writeData(wb_topo, "Topology_Case", topo_case)
+            has_topo_data <- TRUE
+          }
+        }
+        
+        # 2. FEATURE: Node Rewiring (Jaccard)
+        if (sum(net_res$stability$ctrl) > 0 && sum(net_res$stability$case) > 0) {
+          rewiring_df <- calculate_jaccard_rewiring(net_res$stability$ctrl, net_res$stability$case)
+          if (!is.null(rewiring_df)) {
+            addWorksheet(wb_topo, "Rewiring_Analysis")
+            writeData(wb_topo, "Rewiring_Analysis", rewiring_df)
+            has_topo_data <- TRUE
+          }
+        }
+        
+        # 3. FEATURE: Hub-Driver Integration
+        # We need both PLS-DA drivers and Case Topology
+        if (!is.null(spls_drivers) && !is.null(topo_case)) {
+          hub_driver_df <- integrate_hub_drivers(spls_drivers, topo_case)
+          
+          if (!is.null(hub_driver_df)) {
+            addWorksheet(wb_topo, "Hub_Driver_Integration")
+            writeData(wb_topo, "Hub_Driver_Integration", hub_driver_df)
+            has_topo_data <- TRUE
+            
+            # Generate Plot
+            p_hd <- plot_hub_driver_quadrant(hub_driver_df, title_suffix = paste(":", scenario$case_label))
+            if (!is.null(p_hd)) {
+              pdf(file.path(out_dir, "Plot_Hub_Driver_Quadrant.pdf"), width = 8, height = 7)
+              print(p_hd)
+              dev.off()
+            }
+          }
+        }
+        
+        # 4. Differential Edges
+        if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
+          addWorksheet(wb_topo, "Differential_Edges")
+          writeData(wb_topo, "Differential_Edges", net_res$edges_table)
+          has_topo_data <- TRUE
+        }
+        
+        if (has_topo_data) {
+          saveWorkbook(wb_topo, topo_xlsx_path, overwrite = TRUE)
+        }
+      }
+      
       # --- NETWORK VISUALIZATION ---
       # Generate plots if we have valid results
       if (!is.null(net_res) && (sum(net_res$stability$ctrl) > 0 || sum(net_res$stability$case) > 0)) {

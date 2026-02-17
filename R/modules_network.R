@@ -257,6 +257,140 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   ))
 }
 
+#' @title Calculate Node Topology Metrics
+#' @description 
+#' Calculates centralities and topology metrics for a given adjacency matrix.
+#' Returns a clean node-level dataframe.
+#' 
+#' @param adj_mat Adjacency matrix (0/1).
+#' @return Dataframe with node metrics.
+calculate_node_topology <- function(adj_mat) {
+  
+  requireNamespace("igraph", quietly = TRUE)
+  
+  if (sum(adj_mat) == 0) return(NULL)
+  
+  # Build Graph
+  g <- igraph::graph_from_adjacency_matrix(adj_mat, mode = "undirected", diag = FALSE)
+  
+  # Calculate Metrics
+  metrics <- data.frame(
+    Node = igraph::V(g)$name,
+    Degree = igraph::degree(g),
+    Betweenness = igraph::betweenness(g, normalized = TRUE),
+    Closeness = igraph::closeness(g, normalized = TRUE),
+    Eigen_Centrality = igraph::eigen_centrality(g)$vector,
+    Cluster_Coeff = igraph::transitivity(g, type = "local"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Order by Degree (Hubs first)
+  metrics <- metrics[order(metrics$Degree, decreasing = TRUE), ]
+  
+  return(metrics)
+}
+
+#' @title Calculate Node Jaccard Rewiring
+#' @description 
+#' Quantifies how much a node's neighborhood changes between two networks.
+#' Jaccard = Intersection(Neighbors) / Union(Neighbors).
+#' 
+#' @param adj_ctrl Adjacency matrix (0/1) for Control.
+#' @param adj_case Adjacency matrix (0/1) for Case.
+#' @return Dataframe with Jaccard index per node.
+calculate_jaccard_rewiring <- function(adj_ctrl, adj_case) {
+  
+  # Ensure node alignment
+  nodes <- intersect(rownames(adj_ctrl), rownames(adj_case))
+  if (length(nodes) == 0) return(NULL)
+  
+  res_df <- data.frame(
+    Node = nodes,
+    Degree_Ctrl = 0,
+    Degree_Case = 0,
+    Jaccard_Index = NA_real_,
+    stringsAsFactors = FALSE
+  )
+  
+  for (i in seq_along(nodes)) {
+    n <- nodes[i]
+    
+    # Get neighbors (names of connected nodes)
+    # Using which() != 0 is safer for float weights, though adj should be binary
+    neigh_ctrl <- names(which(adj_ctrl[n, ] != 0))
+    neigh_case <- names(which(adj_case[n, ] != 0))
+    
+    # Sets
+    intersect_set <- intersect(neigh_ctrl, neigh_case)
+    union_set <- union(neigh_ctrl, neigh_case)
+    
+    # Store Degrees
+    res_df$Degree_Ctrl[i] <- length(neigh_ctrl)
+    res_df$Degree_Case[i] <- length(neigh_case)
+    
+    # Calculate Jaccard
+    if (length(union_set) > 0) {
+      res_df$Jaccard_Index[i] <- length(intersect_set) / length(union_set)
+    } else {
+      # Both empty: Stable isolation. 
+      # Arguably 1 (perfectly preserved state) or NA. 
+      # We set to 1 to indicate "No rewiring occurred".
+      res_df$Jaccard_Index[i] <- 1.0 
+    }
+  }
+  
+  # Add interpretation
+  res_df$Rewiring_Status <- cut(res_df$Jaccard_Index, 
+                                breaks = c(-Inf, 0.3, 0.7, Inf), 
+                                labels = c("High_Rewiring", "Moderate", "Stable"))
+  
+  return(res_df)
+}
+
+#' @title Integrate Drivers and Topology (Hub-Driver Analysis)
+#' @description 
+#' Merges PLS-DA drivers with Network Topology metrics.
+#' 
+#' @param drivers_df Dataframe output from extract_plsda_loadings.
+#' @param topo_df Dataframe output from calculate_node_topology (usually Case network).
+#' @return Merged dataframe.
+integrate_hub_drivers <- function(drivers_df, topo_df) {
+  
+  if (is.null(drivers_df) || nrow(drivers_df) == 0) return(NULL)
+  if (is.null(topo_df) || nrow(topo_df) == 0) return(NULL)
+  
+  # Prepare Drivers: We need a single "Importance" metric.
+  # If 'Importance' column exists (calculated in modules_multivariate), use it.
+  # Otherwise, take max absolute weight.
+  
+  df_drv <- drivers_df
+  if (!"Importance" %in% names(df_drv)) {
+    # Fallback: Calculate max weight across available components
+    w_cols <- grep("Weight|Comp", names(df_drv), value = TRUE)
+    if (length(w_cols) > 0) {
+      df_drv$Importance <- apply(df_drv[, w_cols, drop=FALSE], 1, function(x) max(abs(x), na.rm=TRUE))
+    } else {
+      return(NULL) # Cannot determine importance
+    }
+  }
+  
+  # Merge
+  merged <- merge(df_drv, topo_df, by.x = "Marker", by.y = "Node")
+  
+  # Calculate Quartiles for Categorization
+  imp_med <- median(merged$Importance, na.rm = TRUE)
+  deg_med <- median(merged$Degree, na.rm = TRUE)
+  
+  merged$Role <- case_when(
+    merged$Importance >= imp_med & merged$Degree >= deg_med ~ "Master_Regulator",
+    merged$Importance >= imp_med & merged$Degree < deg_med  ~ "Solo_Driver",
+    merged$Importance < imp_med & merged$Degree >= deg_med  ~ "Structural_Connector",
+    TRUE ~ "Background"
+  )
+  
+  return(merged)
+}
+
 #' @title Calculate Topology and Export Rich Cytoscape Table
 #' @description 
 #' Calculates node topology metrics and merges them into the edge list.
