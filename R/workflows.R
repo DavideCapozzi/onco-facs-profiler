@@ -216,7 +216,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         wb_topo <- createWorkbook()
         has_topo_data <- FALSE
         
-        # 1. Basic Topology (Control & Case)
+        # A. Calculate Topologies (Axis Y)
+        # ----------------------------------------------------------------------
         topo_ctrl <- NULL
         if (sum(net_res$stability$ctrl) > 0) {
           topo_ctrl <- calculate_node_topology(net_res$stability$ctrl)
@@ -237,7 +238,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           }
         }
         
-        # 2. FEATURE: Node Rewiring (Jaccard)
+        # B. Node Rewiring (Jaccard)
+        # ----------------------------------------------------------------------
         if (sum(net_res$stability$ctrl) > 0 && sum(net_res$stability$case) > 0) {
           rewiring_df <- calculate_jaccard_rewiring(net_res$stability$ctrl, net_res$stability$case)
           if (!is.null(rewiring_df)) {
@@ -247,27 +249,58 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           }
         }
         
-        # 3. FEATURE: Hub-Driver Integration
-        # We need both PLS-DA drivers and Case Topology
-        if (!is.null(spls_drivers) && !is.null(topo_case)) {
-          hub_driver_df <- integrate_hub_drivers(spls_drivers, topo_case)
+        # C. Hub-Driver Integration (Dual Plot Logic)
+        # ----------------------------------------------------------------------
+        plot_list <- list()
+        
+        # 1. Control View (Reference State)
+        if (!is.null(spls_drivers) && !is.null(topo_ctrl)) {
+          hub_driver_ctrl <- integrate_hub_drivers(spls_drivers, topo_ctrl)
           
-          if (!is.null(hub_driver_df)) {
-            addWorksheet(wb_topo, "Hub_Driver_Integration")
-            writeData(wb_topo, "Hub_Driver_Integration", hub_driver_df)
+          if (!is.null(hub_driver_ctrl)) {
+            addWorksheet(wb_topo, "Hub_Driver_Control")
+            writeData(wb_topo, "Hub_Driver_Control", hub_driver_ctrl)
             has_topo_data <- TRUE
             
-            # Generate Plot
-            p_hd <- plot_hub_driver_quadrant(hub_driver_df, title_suffix = paste(":", scenario$case_label))
-            if (!is.null(p_hd)) {
-              pdf(file.path(out_dir, "Plot_Hub_Driver_Quadrant.pdf"), width = 8, height = 7)
-              print(p_hd)
-              dev.off()
-            }
+            p_ctrl <- plot_hub_driver_quadrant(
+              hub_driver_ctrl, 
+              title_suffix = paste0("\nNetwork: ", scenario$control_label, " (Reference)")
+            )
+            plot_list[["Control"]] <- p_ctrl
           }
         }
         
-        # 4. Differential Edges
+        # 2. Case View (Disease State)
+        if (!is.null(spls_drivers) && !is.null(topo_case)) {
+          hub_driver_case <- integrate_hub_drivers(spls_drivers, topo_case)
+          
+          if (!is.null(hub_driver_case)) {
+            addWorksheet(wb_topo, "Hub_Driver_Case")
+            writeData(wb_topo, "Hub_Driver_Case", hub_driver_case)
+            has_topo_data <- TRUE
+            
+            p_case <- plot_hub_driver_quadrant(
+              hub_driver_case, 
+              title_suffix = paste0("\nNetwork: ", scenario$case_label, " (Target)")
+            )
+            plot_list[["Case"]] <- p_case
+          }
+        }
+        
+        # D. Generate PDF (Multi-Page)
+        # ----------------------------------------------------------------------
+        if (length(plot_list) > 0) {
+          pdf_path <- file.path(out_dir, "Plot_Hub_Driver_Quadrant.pdf")
+          pdf(pdf_path, width = 10, height = 8) 
+          
+          # Print Control first, then Case
+          if (!is.null(plot_list[["Control"]])) print(plot_list[["Control"]])
+          if (!is.null(plot_list[["Case"]])) print(plot_list[["Case"]])
+          
+          dev.off()
+        }
+        
+        # E. Differential Edges (Added for completeness)
         if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
           addWorksheet(wb_topo, "Differential_Edges")
           writeData(wb_topo, "Differential_Edges", net_res$edges_table)
