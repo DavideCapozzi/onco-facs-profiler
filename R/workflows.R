@@ -149,7 +149,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             drivers_df = spls_drivers,
             metadata_viz = sub_meta,
             colors_viz = scen_palette,
-            out_path = file.path(out_dir, "Plot_sPLSDA.pdf"),
+            out_path = file.path(out_dir, paste0(scenario$id, "_Plot_sPLSDA.pdf")),
             group_col = "Analysis_Group"
           )
           
@@ -222,8 +222,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         if (sum(net_res$stability$ctrl) > 0) {
           topo_ctrl <- calculate_node_topology(net_res$stability$ctrl)
           if (!is.null(topo_ctrl)) {
-            addWorksheet(wb_topo, "Topology_Control")
-            writeData(wb_topo, "Topology_Control", topo_ctrl)
+            sh_name <- substr(paste0("Topology_", scenario$control_label), 1, 31)
+            addWorksheet(wb_topo, sh_name)
+            writeData(wb_topo, sh_name, topo_ctrl)
             has_topo_data <- TRUE
           }
         }
@@ -232,8 +233,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         if (sum(net_res$stability$case) > 0) {
           topo_case <- calculate_node_topology(net_res$stability$case)
           if (!is.null(topo_case)) {
-            addWorksheet(wb_topo, "Topology_Case")
-            writeData(wb_topo, "Topology_Case", topo_case)
+            sh_name <- substr(paste0("Topology_", scenario$case_label), 1, 31)
+            addWorksheet(wb_topo, sh_name)
+            writeData(wb_topo, sh_name, topo_case)
             has_topo_data <- TRUE
           }
         }
@@ -243,6 +245,14 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         if (sum(net_res$stability$ctrl) > 0 && sum(net_res$stability$case) > 0) {
           rewiring_df <- calculate_jaccard_rewiring(net_res$stability$ctrl, net_res$stability$case)
           if (!is.null(rewiring_df)) {
+            
+            col_ctrl <- paste0("Degree_", scenario$control_label)
+            col_case <- paste0("Degree_", scenario$case_label)
+            
+            rewiring_df <- rewiring_df %>%
+              dplyr::rename(!!col_ctrl := Degree_Ctrl,
+                            !!col_case := Degree_Case)
+            
             addWorksheet(wb_topo, "Rewiring_Analysis")
             writeData(wb_topo, "Rewiring_Analysis", rewiring_df)
             has_topo_data <- TRUE
@@ -258,8 +268,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           hub_driver_ctrl <- integrate_hub_drivers(spls_drivers, topo_ctrl)
           
           if (!is.null(hub_driver_ctrl)) {
-            addWorksheet(wb_topo, "Hub_Driver_Control")
-            writeData(wb_topo, "Hub_Driver_Control", hub_driver_ctrl)
+            sh_name <- substr(paste0("Hub_Driver_", scenario$control_label), 1, 31)
+            addWorksheet(wb_topo, sh_name)
+            writeData(wb_topo, sh_name, hub_driver_ctrl)
             has_topo_data <- TRUE
             
             p_ctrl <- plot_hub_driver_quadrant(
@@ -275,8 +286,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           hub_driver_case <- integrate_hub_drivers(spls_drivers, topo_case)
           
           if (!is.null(hub_driver_case)) {
-            addWorksheet(wb_topo, "Hub_Driver_Case")
-            writeData(wb_topo, "Hub_Driver_Case", hub_driver_case)
+            sh_name <- substr(paste0("Hub_Driver_", scenario$case_label), 1, 31)
+            addWorksheet(wb_topo, sh_name)
+            writeData(wb_topo, sh_name, hub_driver_case)
             has_topo_data <- TRUE
             
             p_case <- plot_hub_driver_quadrant(
@@ -290,7 +302,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         # D. Generate PDF (Multi-Page)
         # ----------------------------------------------------------------------
         if (length(plot_list) > 0) {
-          pdf_path <- file.path(out_dir, "Plot_Hub_Driver_Quadrant.pdf")
+          pdf_path <- file.path(out_dir, paste0(scenario$id, "_Plot_Hub_Driver_Quadrant.pdf"))
           pdf(pdf_path, width = 10, height = 8) 
           
           # Print Control first, then Case
@@ -316,7 +328,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
       # Generate plots if we have valid results
       if (!is.null(net_res) && (sum(net_res$stability$ctrl) > 0 || sum(net_res$stability$case) > 0)) {
         
-        viz_path <- file.path(out_dir, "Plot_Networks.pdf")
+        viz_path <- file.path(out_dir, paste0(scenario$id, "_Plot_Networks.pdf"))
         
         pdf(viz_path, width = 12, height = 6)
         
