@@ -17,25 +17,25 @@ case_groups: ["HNSCC_EP", "NSCLC_EP", "NSCLC_LS", "HNSCC_LS"]
 # --- ANALYSIS SCENARIOS (Config-Driven Orchestration) ---
 # Each item here triggers a full analysis cycle (Hypothesis -> Multivariate -> Network)
 analysis_scenarios:
-  - id: "01_Benchmark_Disease"
+  - id: "01_HDvsEP"
     description: "Characterizing the disease signature"
-    case_label: "Total_Cancer"
+    case_label: "EP"
     case_groups: ["HNSCC_EP", "NSCLC_EP"]
-    control_label: "Healthy_Ref"
+    control_label: "HD"
     control_groups: ["Healthy_Donors"]
     
-  - id: "02_Normalization_Check"
+  - id: "02_HDvsLS"
     description: "Checking if Long Survivors return to healthy phenotype"
-    case_label: "Total_LS"
+    case_label: "LS"
     case_groups: ["HNSCC_LS", "NSCLC_LS"]
-    control_label: "Healthy_Ref"
+    control_label: "HD"
     control_groups: ["Healthy_Donors"]
     
-  - id: "03_Resistance_Mechanism"
+  - id: "03_EPvsLS"
     description: "Identifying resistance features (Long survivors vs Early Progressors)"
-    case_label: "Total_LS"
+    case_label: "LS"
     case_groups: ["HNSCC_LS", "NSCLC_LS"]
-    control_label: "Total_Cancer"
+    control_label: "EP"
     control_groups: ["HNSCC_EP", "NSCLC_EP"]
 
 # --- STRATIFICATION LOGIC ---
@@ -157,9 +157,9 @@ colors:
     Healthy_Donors: "#2E8B57" 
     
     # Multi-layer analyses
-    Healthy_Ref: "#2E8B57"   
-    Total_Cancer: "#CD5C5C"  
-    Total_LS: "#FFD700"   
+    HD: "#2E8B57"   
+    EP: "#CD5C5C"  
+    LS: "#FFD700"   
 
   highlight: "#FFD700"  
 

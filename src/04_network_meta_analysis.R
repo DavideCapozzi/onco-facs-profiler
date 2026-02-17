@@ -15,7 +15,7 @@ suppressPackageStartupMessages({
 source("R/utils_io.R")
 source("R/modules_viz.R")
 
-message("\n=== PIPELINE STEP 5: DIFFERENTIAL META-ANALYSIS ===")
+message("\n=== PIPELINE STEP 4: DIFFERENTIAL META-ANALYSIS ===")
 
 # 1. Setup & Configuration
 # ------------------------------------------------------------------------------
@@ -170,4 +170,4 @@ if (length(diff_edges_list) >= 2) {
   message("[Meta] Less than 2 scenarios with significant edges. Venn analysis skipped.")
 }
 
-message("=== STEP 5 COMPLETE ===\n")
+message("=== STEP 4 COMPLETE ===\n")

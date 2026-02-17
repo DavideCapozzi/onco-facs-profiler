@@ -80,7 +80,7 @@ load_raw_data <- function(config) {
 
 #' @title Save Quality Control Report to Excel
 #' @description Generates a multi-sheet Excel report with filtering statistics, group breakdowns, and categorized marker lists.
-#' @param qc_list A list containing summary stats, dataframes of dropped items, and group mappings.
+#' @param qc_list A list containing summary stats, dataframes of dropped items, group mappings, and optionally imputed_details.
 #' @param out_path Path to save the .xlsx file.
 #' @param config Configuration object (optional) containing 'qc_reporting' settings for marker categorization.
 save_qc_report <- function(qc_list, out_path, config = NULL) {
@@ -372,6 +372,26 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
     writeData(wb, "Details_Dropped", "Dropped Markers (QC):", startRow = curr_row_det)
     addStyle(wb, "Details_Dropped", createStyle(textDecoration = "bold"), rows = curr_row_det, cols = 1)
     writeData(wb, "Details_Dropped", qc_list$dropped_cols_detail, startRow = curr_row_det + 1)
+  }
+  
+  # --- Sheet 3: Details Imputed (New addition) ---
+  if (!is.null(qc_list$imputed_details) && nrow(qc_list$imputed_details) > 0) {
+    addWorksheet(wb, "Details_Imputed")
+    curr_row_imp <- 1
+    
+    writeData(wb, "Details_Imputed", "Samples requiring Imputation:", startRow = curr_row_imp)
+    addStyle(wb, "Details_Imputed", createStyle(textDecoration = "bold"), rows = curr_row_imp, cols = 1)
+    
+    # Write Main Table
+    writeData(wb, "Details_Imputed", qc_list$imputed_details, startRow = curr_row_imp + 1)
+    
+    # Calculate Total Row Position (Header + Data + 2 blank lines)
+    total_row_idx <- curr_row_imp + 1 + nrow(qc_list$imputed_details) + 2
+    
+    # Write Total Summary
+    total_msg <- paste("Total imputed samples:", nrow(qc_list$imputed_details))
+    writeData(wb, "Details_Imputed", total_msg, startRow = total_row_idx)
+    addStyle(wb, "Details_Imputed", createStyle(textDecoration = "bold"), rows = total_row_idx, cols = 1)
   }
   
   saveWorkbook(wb, out_path, overwrite = TRUE)

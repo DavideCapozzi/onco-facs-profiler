@@ -206,6 +206,49 @@ raw_data <- raw_data %>% filter(Patient_ID %in% rownames(mat_raw))
 
 message(sprintf("[QC] Final Dimensions: %d Samples x %d Markers", nrow(mat_raw), ncol(mat_raw)))
 
+# Calculate imputation details on the final filtered matrix before saving report
+impute_info_df <- data.frame(
+  Patient_ID = character(), 
+  NA_Percent = numeric(), 
+  Original_Source = character(), 
+  Imputed_Markers = character(),
+  stringsAsFactors = FALSE
+)
+
+# Identify samples with NAs
+na_counts_per_row <- rowSums(is.na(mat_raw))
+rows_with_na <- which(na_counts_per_row > 0)
+
+if (length(rows_with_na) > 0) {
+  pids_na <- rownames(mat_raw)[rows_with_na]
+  
+  # Determine Group/Source column safely
+  grp_col <- if(config$metadata$subgroup_col %in% colnames(metadata_raw)) config$metadata$subgroup_col else "Group"
+  
+  # Construct list of markers per patient
+  markers_list <- apply(mat_raw[rows_with_na, , drop=FALSE], 1, function(row_vals) {
+    paste(names(row_vals)[is.na(row_vals)], collapse = ", ")
+  })
+  
+  # Match metadata
+  meta_indices <- match(pids_na, metadata_raw$Patient_ID)
+  sources <- as.character(metadata_raw[[grp_col]][meta_indices])
+  
+  # Calculate Percentages
+  na_pcts <- round((na_counts_per_row[rows_with_na] / ncol(mat_raw)) * 100, 2)
+  
+  impute_info_df <- data.frame(
+    Patient_ID = pids_na,
+    NA_Percent = na_pcts,
+    Original_Source = sources,
+    Imputed_Markers = markers_list,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Inject into report object
+qc_result$report$imputed_details <- impute_info_df
+
 # Save QC Report
 out_dir <- file.path(config$output_root, "01_data_processing")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
