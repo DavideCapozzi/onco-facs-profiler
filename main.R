@@ -103,7 +103,7 @@ tryCatch({
       }
       
       message("\n>>> RUNNING PHASE 3: META-ANALYSIS & CHARACTERIZATION <<<")
-      source(here("src/05_network_meta_analysis.R"), echo = FALSE)
+      source(here("src/04_network_meta_analysis.R"), echo = FALSE)
       
       # Consolidated Reporting
       if (length(all_results) > 0) {
