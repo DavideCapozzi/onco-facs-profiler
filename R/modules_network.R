@@ -179,9 +179,16 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     return(list(edges_table = data.frame(), networks = list()))
   }
   
-  # --- STEP 2: OBSERVED DIFFERENCE ---
+  # --- STEP 2: OBSERVED DIFFERENCE & RAW CORRELATION ---
+  # Calculate Partial Correlation (Shrinkage)
   obs_ctrl <- infer_network_pcor(mat_ctrl, fixed_lambda = NULL)
   obs_case <- infer_network_pcor(mat_case, fixed_lambda = NULL)
+  
+  # Calculate Standard Correlation (Pearson) for reference
+  # We use pairwise.complete.obs to handle any potential NA safety, though data should be clean
+  raw_cor_ctrl <- cor(mat_ctrl, use = "pairwise.complete.obs")
+  raw_cor_case <- cor(mat_case, use = "pairwise.complete.obs")
+  
   obs_diff <- abs(obs_ctrl - obs_case)
   
   # --- STEP 3: PERMUTATION TEST ---
@@ -224,8 +231,10 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
       results_list[[k]] <- data.frame(
         Node1 = nodes[i],
         Node2 = nodes[j],
-        Weight_Ctrl = obs_ctrl[i,j],
-        Weight_Case = obs_case[i,j],
+        Weight_Ctrl = obs_ctrl[i,j],    # Will be renamed to Pcor_
+        Weight_Case = obs_case[i,j],    # Will be renamed to Pcor_
+        Cor_Ctrl = raw_cor_ctrl[i,j],   # New: Standard Correlation
+        Cor_Case = raw_cor_case[i,j],   # New: Standard Correlation
         Is_Stable_Ctrl = agg_ctrl$adj[i,j] == 1,
         Is_Stable_Case = agg_case$adj[i,j] == 1,
         Diff_Score = obs_val,
@@ -241,8 +250,15 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     res_df <- res_df[order(res_df$P_Value), ]
     
     # --- DYNAMIC RENAMING ---
-    colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Weight_", label_ctrl)
-    colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Weight_", label_case)
+    # Rename Weight -> Pcor
+    colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Pcor_", label_ctrl)
+    colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Pcor_", label_case)
+    
+    # Rename Cor -> Cor_Label
+    colnames(res_df)[colnames(res_df) == "Cor_Ctrl"] <- paste0("Cor_", label_ctrl)
+    colnames(res_df)[colnames(res_df) == "Cor_Case"] <- paste0("Cor_", label_case)
+    
+    # Rename Stability columns
     colnames(res_df)[colnames(res_df) == "Is_Stable_Ctrl"] <- paste0("Is_Stable_", label_ctrl)
     colnames(res_df)[colnames(res_df) == "Is_Stable_Case"] <- paste0("Is_Stable_", label_case)
     
