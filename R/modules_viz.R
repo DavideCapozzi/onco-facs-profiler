@@ -393,6 +393,93 @@ plot_pca_variables <- function(pca_res) {
     theme_coda()
 }
 
+#' @title Plot PCA Variance Dashboard
+#' @description 
+#' Visualizes explained variance per component with bars, curve, labels, 
+#' and a side-list of cumulative variance values.
+#' All labels are strictly in English.
+#' 
+#' @param pca_res Result object from FactoMineR::PCA.
+#' @param n_list Integer. Number of top components to list on the side (default 10).
+#' @return A ggplot object.
+plot_pca_variance_dashboard <- function(pca_res, n_list = 10) {
+  
+  # 1. Extract Eigenvalues/Variance
+  eig_df <- as.data.frame(pca_res$eig)
+  # Standardize column names from FactoMineR
+  colnames(eig_df) <- c("eigenvalue", "variance_percent", "cumulative_variance_percent")
+  
+  # Create PC identifiers (PC1, PC2...) and ensure factor order
+  eig_df$PC <- factor(rownames(eig_df), levels = rownames(eig_df))
+  eig_df$PC_Num <- 1:nrow(eig_df)
+  
+  # Limit to dimensions present
+  n_pcs <- nrow(eig_df)
+  # Dynamic limit for the plot (show max 15 bars for readability, or all if low dim)
+  n_plot <- min(n_pcs, 15) 
+  plot_data <- eig_df[1:n_plot, ]
+  
+  # 2. Prepare Side List Text
+  n_list_actual <- min(n_pcs, n_list)
+  list_data <- eig_df[1:n_list_actual, ]
+  
+  # Formatting the text table
+  table_text <- paste0(
+    "PC", list_data$PC_Num, ": ", 
+    sprintf("%.1f%%", list_data$variance_percent), 
+    " (Cum: ", sprintf("%.1f%%", list_data$cumulative_variance_percent), ")"
+  )
+  final_label <- paste(table_text, collapse = "\n")
+  header_label <- paste0("Top ", n_list_actual, " Components\n(Var / Cumulative)")
+  
+  # 3. Plotting
+  # We use a secondary axis scaling factor if needed, but for simplicity
+  # since both variance and cumulative are %, we plot variance on Y.
+  # The "Curve" usually represents the scree (variance), not cumulative, 
+  # to match the histogram profile.
+  
+  p <- ggplot(plot_data, aes(x = PC, y = variance_percent)) +
+    
+    # A. Histograms (Bars)
+    geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7, width = 0.7) +
+    
+    # B. The Curve (Scree line connecting bars)
+    geom_line(aes(group = 1), color = "darkred", size = 1, linetype = "dashed") +
+    geom_point(color = "darkred", size = 2) +
+    
+    # C. Labels above histograms
+    geom_text(aes(label = sprintf("%.1f%%", variance_percent)), 
+              vjust = -0.5, size = 3.5, fontface = "bold") +
+    
+    # D. The Side List (Annotation)
+    # We create a text annotation on the right. 
+    # Logic: Place it at x = n_plot + 0.5, y = max_variance.
+    annotate("text", x = n_plot + 0.6, y = max(plot_data$variance_percent) * 0.9, 
+             label = header_label, hjust = 0, vjust = 1, fontface = "bold", size = 4, color = "gray20") +
+    annotate("text", x = n_plot + 0.6, y = max(plot_data$variance_percent) * 0.8, 
+             label = final_label, hjust = 0, vjust = 1, size = 3.5, color = "gray30", lineheight = 1.2) +
+    
+    # Scales & Expansion
+    scale_y_continuous(limits = c(0, max(plot_data$variance_percent) * 1.15), 
+                       expand = c(0, 0)) +
+    # Expand X axis to make room for the list on the right
+    scale_x_discrete(expand = expansion(add = c(0.6, 4))) + 
+    
+    # Theme & Labels
+    labs(
+      title = "PCA Scree Plot & Variance Explained",
+      subtitle = "Explained Variance per Principal Component",
+      x = "Principal Component",
+      y = "Explained Variance (%)"
+    ) +
+    theme_coda() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  return(p)
+}
+
 #' @title Plot Stratification Heatmap (ComplexHeatmap)
 #' @description 
 #' Generates a clustered heatmap using Z-scored data.

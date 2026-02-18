@@ -102,18 +102,25 @@ res_pca <- PCA(mat_z_global, scale.unit = FALSE, graph = FALSE)
 highlight_map <- c()
 if (hl_pattern != "") highlight_map[[hl_pattern]] <- config$colors$highlight
 
-pdf(file.path(out_dir, "PCA_Global_Individuals.pdf"), width = 9, height = 7)
+pdf(file.path(out_dir, "PCA_Global_Individuals.pdf"), width = 11, height = 7) 
 
 # Define dimensions to explore
 target_dims_list <- list(c(1,2), c(1,3), c(2,3))
 
-# Loop A: Individuals Plots
+# A: Individuals Plots
 for (dims in target_dims_list) {
   print(plot_pca_custom(res_pca, meta_viz, colors_viz, dims = dims, 
                         show_labels = TRUE, highlight_patterns = highlight_map))
 }
 
-# Loop B: Variables Plots (Correlation Circle) [NEW ADDITION]
+# B: Variance Scree Plot 
+message("   [PCA] Plotting Variance Scree Plot")
+tryCatch({
+  p_scree <- plot_pca_variance_dashboard(res_pca, n_list = 10)
+  print(p_scree)
+}, error = function(e) warning(paste("Scree plot failed:", e$message)))
+
+# C: Variables Plots 
 for (dims in target_dims_list) {
   # We use the standard function from modules_viz but explicitly setting axes
   p_var <- plot_pca_variables(res_pca) +
