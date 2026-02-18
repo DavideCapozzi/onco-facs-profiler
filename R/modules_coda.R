@@ -214,7 +214,7 @@ coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage")
   
   if (n_low > 0 || n_high > 0) {
     # Optional: Log clamping actions if needed
-    # message(sprintf("   [CoDa] Clamped %d boundary values.", n_low + n_high))
+    message(sprintf("   [CoDa] Clamped %d boundary values.", n_low + n_high))
   }
   
   p[p < epsilon] <- epsilon
