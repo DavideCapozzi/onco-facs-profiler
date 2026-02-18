@@ -1037,3 +1037,48 @@ plot_hub_driver_quadrant <- function(hub_driver_df, y_label = "Degree", title_su
   return(p)
 }
 
+# R/modules_viz.R
+
+#' @title Plot Partial Correlation Density
+#' @description 
+#' Visualizes the distribution of partial correlation values (Shrinkage).
+#' Shows the cutoff threshold relative to the distribution of signal vs noise.
+#' 
+#' @param pcor_mat Numeric matrix of partial correlations.
+#' @param threshold Numeric. The magnitude threshold used for filtering.
+#' @param group_label String. Label for the group (e.g., "Healthy").
+#' @return A ggplot object.
+viz_plot_edge_density <- function(pcor_mat, threshold = 0.15, group_label = "") {
+  
+  require(ggplot2)
+  
+  # Extract upper triangle values (exclude diagonal and duplicates)
+  vals <- pcor_mat[upper.tri(pcor_mat)]
+  
+  # Basic Stats
+  n_total <- length(vals)
+  n_kept <- sum(abs(vals) >= threshold)
+  pct_kept <- round((n_kept / n_total) * 100, 1)
+  
+  df_plot <- data.frame(Value = vals)
+  
+  p <- ggplot(df_plot, aes(x = Value)) +
+    # Density Curve
+    geom_density(fill = "steelblue", alpha = 0.3) +
+    # Threshold Lines
+    geom_vline(xintercept = c(-threshold, threshold), 
+               linetype = "dashed", color = "red", size = 0.8) +
+    
+    # Annotation
+    labs(
+      title = paste("Edge Weight Distribution:", group_label),
+      subtitle = sprintf("Threshold: |rho| > %.2f (Keeps %.1f%% of %d edges)", 
+                         threshold, pct_kept, n_total),
+      x = "Partial Correlation (Shrinkage)",
+      y = "Density"
+    ) +
+    theme_coda() +
+    xlim(-1, 1) # Partial correlations are bounded -1 to 1
+  
+  return(p)
+}

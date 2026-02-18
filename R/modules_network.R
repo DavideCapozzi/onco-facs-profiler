@@ -120,11 +120,13 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
 #' @param stability_thresh Frequency threshold to keep an edge (e.g., 0.8 = 80%).
 #' @param label_ctrl Label for control group (used for dynamic column naming).
 #' @param label_case Label for case group (used for dynamic column naming).
+#' @param magnitude_threshold Threshold for pcor values
 #' @return List with edge table and network objects.
 run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
                                      seed = 123, n_cores = 1, pvalue_thresh = 0.05, 
                                      stability_thresh = 0.8,
-                                     label_ctrl = "Ctrl", label_case = "Case") {
+                                     label_ctrl = "Ctrl", label_case = "Case",
+                                     magnitude_threshold = 0.15) {
   
   requireNamespace("parallel", quietly = TRUE)
   requireNamespace("doParallel", quietly = TRUE)
@@ -210,7 +212,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   }
   
   # --- STEP 4: P-VALUE & FDR ---
-  message("      [DiffNet] 3/3 calculating statistics...")
+  message("      [DiffNet] 3/3 calculating statistics and categorizing edges...")
   
   nodes <- colnames(mat_ctrl)
   edges_idx <- which(upper.tri(stable_mask) & stable_mask, arr.ind = TRUE)
@@ -223,22 +225,49 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
       i <- edges_idx[k,1]
       j <- edges_idx[k,2]
       
+      # Extract raw weights
+      w_ctrl <- obs_ctrl[i,j]
+      w_case <- obs_case[i,j]
+      
       obs_val <- obs_diff[i,j]
       null_vals <- sapply(null_diffs, function(m) m[i, j])
-      
       p_val <- (sum(null_vals >= obs_val) + 1) / denom
+      
+      # --- NEW: BIOLOGICAL CLASSIFICATION LOGIC ---
+      # 1. Magnitude Check (At least one must be biologically relevant)
+      is_relevant <- (abs(w_ctrl) >= magnitude_threshold) | (abs(w_case) >= magnitude_threshold)
+      
+      category <- "Weak"
+      if (is_relevant) {
+        # Check Signs (Note: Small floating point noise around 0 is handled by magnitude check above)
+        same_sign <- (sign(w_ctrl) == sign(w_case))
+        
+        if (!same_sign) {
+          # Signs oppose: SWITCH
+          category <- "Switch"
+        } else {
+          # Signs agree: Check if conserved or specific
+          # Conserved if BOTH are above threshold
+          if (abs(w_ctrl) >= magnitude_threshold && abs(w_case) >= magnitude_threshold) {
+            category <- "Conserved"
+          } else {
+            category <- "Specific" # One is strong, one is weak (but same sign/zero)
+          }
+        }
+      }
       
       results_list[[k]] <- data.frame(
         Node1 = nodes[i],
         Node2 = nodes[j],
-        Weight_Ctrl = obs_ctrl[i,j],    # Will be renamed to Pcor_
-        Weight_Case = obs_case[i,j],    # Will be renamed to Pcor_
-        Cor_Ctrl = raw_cor_ctrl[i,j],   # New: Standard Correlation
-        Cor_Case = raw_cor_case[i,j],   # New: Standard Correlation
+        Weight_Ctrl = w_ctrl,    
+        Weight_Case = w_case,    
+        Cor_Ctrl = raw_cor_ctrl[i,j],   
+        Cor_Case = raw_cor_case[i,j],   
         Is_Stable_Ctrl = agg_ctrl$adj[i,j] == 1,
         Is_Stable_Case = agg_case$adj[i,j] == 1,
         Diff_Score = obs_val,
         P_Value = p_val,
+        Edge_Category = category, # NEW COLUMN
         stringsAsFactors = FALSE
       )
     }
@@ -247,10 +276,12 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     
     res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
     res_df$Significant <- res_df$P_Value < pvalue_thresh
-    res_df <- res_df[order(res_df$P_Value), ]
     
-    # --- DYNAMIC RENAMING ---
-    # Rename Weight -> Pcor
+    # Sort: Prioritize Switches and Significant changes
+    res_df <- res_df %>% 
+      arrange(factor(Edge_Category, levels = c("Switch", "Specific", "Conserved", "Weak")), P_Value)
+    
+    # --- DYNAMIC RENAMING (Existing logic) ---
     colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Pcor_", label_ctrl)
     colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Pcor_", label_case)
     
