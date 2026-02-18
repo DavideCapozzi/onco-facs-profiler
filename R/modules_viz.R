@@ -978,24 +978,31 @@ viz_plot_differential_overlap <- function(edge_list, fill_colors = NULL, title =
 }
 
 #' @title Plot Hub-Driver Quadrant
-#' @description 
-#' Scatter plot of PLS-DA Importance vs Network Centrality.
-#' 
+#' @description Scatter plot of PLS-DA Importance vs Network Topology.
 #' @param hub_driver_df Output from integrate_hub_drivers.
+#' @param y_label String. Label for Y axis (e.g., "Degree" or "Betweenness").
 #' @param title_suffix String to append to title.
 #' @return ggplot object.
-plot_hub_driver_quadrant <- function(hub_driver_df, title_suffix = "") {
+plot_hub_driver_quadrant <- function(hub_driver_df, y_label = "Degree", title_suffix = "") {
   
   require(ggplot2)
   require(ggrepel)
   
   if (is.null(hub_driver_df) || nrow(hub_driver_df) == 0) return(NULL)
   
+  # Use the generic column created in integrate_hub_drivers
+  y_col_name <- "Topology_Metric_Value" 
+  
+  # Fallback if the generic column is missing (e.g. using old integration)
+  if (!y_col_name %in% names(hub_driver_df)) {
+    y_col_name <- "Degree"
+  }
+  
   # Define Quadrant Lines
   x_mid <- median(hub_driver_df$Importance, na.rm = TRUE)
-  y_mid <- median(hub_driver_df$Degree, na.rm = TRUE)
+  y_mid <- median(hub_driver_df[[y_col_name]], na.rm = TRUE)
   
-  p <- ggplot(hub_driver_df, aes(x = Importance, y = Degree, fill = Role)) +
+  p <- ggplot(hub_driver_df, aes(x = Importance, y = .data[[y_col_name]], fill = Role)) +
     # Quadrant Lines
     geom_vline(xintercept = x_mid, linetype = "dashed", color = "gray60") +
     geom_hline(yintercept = y_mid, linetype = "dashed", color = "gray60") +
@@ -1019,9 +1026,9 @@ plot_hub_driver_quadrant <- function(hub_driver_df, title_suffix = "") {
     
     labs(
       title = paste("Hub-Driver Analysis", title_suffix),
-      subtitle = "Integration of Multivariate (sPLS-DA) and Network (Degree) Metrics",
+      subtitle = paste("sPLS-DA Importance vs", y_label),
       x = "Statistical Importance (sPLS-DA)",
-      y = "Topological Centrality (Degree)",
+      y = paste("Topological Centrality (", y_label, ")", sep=""),
       caption = "Quadrants defined by median values"
     ) +
     theme_coda() +
@@ -1029,3 +1036,4 @@ plot_hub_driver_quadrant <- function(hub_driver_df, title_suffix = "") {
   
   return(p)
 }
+

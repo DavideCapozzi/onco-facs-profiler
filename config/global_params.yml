@@ -191,7 +191,8 @@ stats:
   n_boot: 1000        
   n_perm: 2000        
   alpha: 0.05         
-  fdr_threshold: 0.1 
+  pvalue_threshold: 0.05
+  network_edge_threshold: 0.15
   n_cores: "auto"
 
 EOF: TRUE

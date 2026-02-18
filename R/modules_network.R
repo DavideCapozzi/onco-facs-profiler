@@ -116,13 +116,13 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
 #' @param n_perm Number of permutations for significance (default 1000).
 #' @param seed Random seed.
 #' @param n_cores Number of cores.
-#' @param fdr_thresh FDR threshold.
+#' @param pvalue_thresh P-value threshold for significance (default 0.05).
 #' @param stability_thresh Frequency threshold to keep an edge (e.g., 0.8 = 80%).
 #' @param label_ctrl Label for control group (used for dynamic column naming).
 #' @param label_case Label for case group (used for dynamic column naming).
 #' @return List with edge table and network objects.
 run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
-                                     seed = 123, n_cores = 1, fdr_thresh = 0.1, 
+                                     seed = 123, n_cores = 1, pvalue_thresh = 0.05, 
                                      stability_thresh = 0.8,
                                      label_ctrl = "Ctrl", label_case = "Case") {
   
@@ -246,7 +246,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     res_df <- do.call(rbind, results_list)
     
     res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
-    res_df$Significant <- res_df$FDR < fdr_thresh
+    res_df$Significant <- res_df$P_Value < pvalue_thresh
     res_df <- res_df[order(res_df$P_Value), ]
     
     # --- DYNAMIC RENAMING ---
@@ -364,45 +364,50 @@ calculate_jaccard_rewiring <- function(adj_ctrl, adj_case) {
 }
 
 #' @title Integrate Drivers and Topology (Hub-Driver Analysis)
-#' @description 
-#' Merges PLS-DA drivers with Network Topology metrics.
-#' 
+#' @description Merges PLS-DA drivers with Network Topology metrics to identify roles.
 #' @param drivers_df Dataframe output from extract_plsda_loadings.
-#' @param topo_df Dataframe output from calculate_node_topology (usually Case network).
-#' @return Merged dataframe.
-integrate_hub_drivers <- function(drivers_df, topo_df) {
+#' @param topo_df Dataframe output from calculate_node_topology.
+#' @param topo_col String. Name of the topology metric to use for Y-axis classification (default "Degree").
+#' @return Merged dataframe with "Role" column.
+integrate_hub_drivers <- function(drivers_df, topo_df, topo_col = "Degree") {
   
   if (is.null(drivers_df) || nrow(drivers_df) == 0) return(NULL)
   if (is.null(topo_df) || nrow(topo_df) == 0) return(NULL)
   
-  # Prepare Drivers: We need a single "Importance" metric.
-  # If 'Importance' column exists (calculated in modules_multivariate), use it.
-  # Otherwise, take max absolute weight.
+  # Clean column names to ensure matching
+  # Usually extract_plsda_loadings returns "Marker" and topo returns "Node"
   
-  df_drv <- drivers_df
-  if (!"Importance" %in% names(df_drv)) {
-    # Fallback: Calculate max weight across available components
-    w_cols <- grep("Weight|Comp", names(df_drv), value = TRUE)
-    if (length(w_cols) > 0) {
-      df_drv$Importance <- apply(df_drv[, w_cols, drop=FALSE], 1, function(x) max(abs(x), na.rm=TRUE))
-    } else {
-      return(NULL) # Cannot determine importance
-    }
-  }
+  # Select only the highest importance per marker (if duplicates exist)
+  df_drv <- drivers_df %>%
+    dplyr::group_by(Marker) %>%
+    dplyr::slice_max(order_by = Importance, n = 1) %>%
+    dplyr::ungroup()
   
   # Merge
   merged <- merge(df_drv, topo_df, by.x = "Marker", by.y = "Node")
   
-  # Calculate Quartiles for Categorization
-  imp_med <- median(merged$Importance, na.rm = TRUE)
-  deg_med <- median(merged$Degree, na.rm = TRUE)
+  if (nrow(merged) == 0) return(NULL)
   
-  merged$Role <- case_when(
-    merged$Importance >= imp_med & merged$Degree >= deg_med ~ "Master_Regulator",
-    merged$Importance >= imp_med & merged$Degree < deg_med  ~ "Solo_Driver",
-    merged$Importance < imp_med & merged$Degree >= deg_med  ~ "Structural_Connector",
+  # Validation: check if topo_col exists in the merged dataframe
+  if (!topo_col %in% names(merged)) {
+    warning(sprintf("[Network] Topology column '%s' not found. Reverting to 'Degree'.", topo_col))
+    topo_col <- "Degree"
+  }
+  
+  # Calculate Quartiles/Medians for Categorization based on the SPECIFIC metric
+  imp_med <- median(merged$Importance, na.rm = TRUE)
+  topo_med <- median(merged[[topo_col]], na.rm = TRUE) # Dynamic Median calculation
+  
+  # Assign Roles dynamically
+  merged$Role <- dplyr::case_when(
+    merged$Importance >= imp_med & merged[[topo_col]] >= topo_med ~ "Master_Regulator",
+    merged$Importance >= imp_med & merged[[topo_col]] < topo_med  ~ "Solo_Driver",
+    merged$Importance < imp_med & merged[[topo_col]] >= topo_med  ~ "Structural_Connector",
     TRUE ~ "Background"
   )
+  
+  # Store the specific metric used in a generic column for easier plotting later
+  merged$Topology_Metric_Value <- merged[[topo_col]] 
   
   return(merged)
 }

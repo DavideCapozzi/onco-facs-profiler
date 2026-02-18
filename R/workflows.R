@@ -124,8 +124,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         if (actual_folds < 2) actual_folds <- 2
         
         spls_res <- run_splsda_model(
-          data_z = sub_mat,          
-          metadata = sub_meta,       
+          data_z = sub_mat,           
+          metadata = sub_meta,        
           group_col = "Analysis_Group",
           n_comp = n_comp, 
           folds = actual_folds,
@@ -137,11 +137,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         if (nrow(spls_drivers) > 0) {
           
           # --- DYNAMIC COLOR MAPPING ---
-          # Create a specific palette for this scenario to avoid "Missing color" errors
           scen_palette <- c()
-          # Assign control color
           scen_palette[scenario$control_label] <- config$colors$control
-          # Assign generic case color (use the first available case color from config)
           scen_palette[scenario$case_label] <- if(length(config$colors$cases) > 0) config$colors$cases[[1]] else "firebrick"
           
           viz_report_plsda(
@@ -189,7 +186,10 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
       
       n_boot_cfg <- if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100
       n_perm_cfg <- if(!is.null(config$stats$n_perm)) config$stats$n_perm else 1000
-      fdr_cfg <- if(!is.null(config$stats$fdr_threshold)) config$stats$fdr_threshold else 0.1
+      
+      # FIX: Correctly read 'pvalue_threshold' (avoid reading old fdr_threshold)
+      pval_threshold_cfg <- if(!is.null(config$stats$pvalue_threshold)) config$stats$pvalue_threshold else 0.05
+      
       seed_cfg <- if(!is.null(config$stats$seed)) config$stats$seed else 123
       n_cores_cfg <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1
       
@@ -200,7 +200,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         n_perm = n_perm_cfg,
         seed = seed_cfg,
         n_cores = n_cores_cfg,
-        fdr_thresh = fdr_cfg,
+        pvalue_thresh = pval_threshold_cfg,
         stability_thresh = 0.8,
         label_ctrl = scenario$control_label,
         label_case = scenario$case_label
@@ -220,6 +220,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         # ----------------------------------------------------------------------
         topo_ctrl <- NULL
         if (sum(net_res$stability$ctrl) > 0) {
+          # FIX: Pass ONLY the stability matrix (1 argument)
           topo_ctrl <- calculate_node_topology(net_res$stability$ctrl)
           if (!is.null(topo_ctrl)) {
             sh_name <- substr(paste0("Topology_", scenario$control_label), 1, 31)
@@ -231,6 +232,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         
         topo_case <- NULL
         if (sum(net_res$stability$case) > 0) {
+          # FIX: Pass ONLY the stability matrix (1 argument)
           topo_case <- calculate_node_topology(net_res$stability$case)
           if (!is.null(topo_case)) {
             sh_name <- substr(paste0("Topology_", scenario$case_label), 1, 31)
@@ -259,70 +261,95 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           }
         }
         
-        # C. Hub-Driver Integration (Dual Plot Logic)
+        # C. Hub-Driver Integration (Degree & Betweenness Analysis)
         # ----------------------------------------------------------------------
-        plot_list <- list()
+        pdf_path <- file.path(out_dir, paste0(scenario$id, "_Hub_Driver_Report_4Page.pdf"))
         
-        # 1. Control View (Reference State)
-        if (!is.null(spls_drivers) && !is.null(topo_ctrl)) {
-          hub_driver_ctrl <- integrate_hub_drivers(spls_drivers, topo_ctrl)
+        if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
           
-          if (!is.null(hub_driver_ctrl)) {
-            sh_name <- substr(paste0("Hub_Driver_", scenario$control_label), 1, 31)
-            addWorksheet(wb_topo, sh_name)
-            writeData(wb_topo, sh_name, hub_driver_ctrl)
-            has_topo_data <- TRUE
+          pdf(pdf_path, width = 11, height = 8)
+          
+          # --- PAGE 1: Control - Degree ---
+          if (!is.null(topo_ctrl)) {
+            hub_driver_ctrl <- integrate_hub_drivers(spls_drivers, topo_ctrl, topo_col = "Degree")
             
-            p_ctrl <- plot_hub_driver_quadrant(
-              hub_driver_ctrl, 
-              title_suffix = paste0("\nNetwork: ", scenario$control_label, " (Reference)")
-            )
-            plot_list[["Control"]] <- p_ctrl
+            if (!is.null(hub_driver_ctrl)) {
+              sh_name <- substr(paste0("Hub_Driver_", scenario$control_label), 1, 31)
+              if(!sh_name %in% names(wb_topo)) addWorksheet(wb_topo, sh_name)
+              writeData(wb_topo, sh_name, hub_driver_ctrl)
+              has_topo_data <- TRUE
+              
+              p1 <- plot_hub_driver_quadrant(
+                hub_driver_ctrl, 
+                y_label = "Degree",
+                title_suffix = paste0("\nNetwork: ", scenario$control_label, " (Reference)")
+              )
+              if (!is.null(p1)) print(p1)
+            }
           }
-        }
-        
-        # 2. Case View (Disease State)
-        if (!is.null(spls_drivers) && !is.null(topo_case)) {
-          hub_driver_case <- integrate_hub_drivers(spls_drivers, topo_case)
           
-          if (!is.null(hub_driver_case)) {
-            sh_name <- substr(paste0("Hub_Driver_", scenario$case_label), 1, 31)
-            addWorksheet(wb_topo, sh_name)
-            writeData(wb_topo, sh_name, hub_driver_case)
-            has_topo_data <- TRUE
+          # --- PAGE 2: Case - Degree ---
+          if (!is.null(topo_case)) {
+            hub_driver_case <- integrate_hub_drivers(spls_drivers, topo_case, topo_col = "Degree")
             
-            p_case <- plot_hub_driver_quadrant(
-              hub_driver_case, 
-              title_suffix = paste0("\nNetwork: ", scenario$case_label, " (Target)")
-            )
-            plot_list[["Case"]] <- p_case
+            if (!is.null(hub_driver_case)) {
+              sh_name <- substr(paste0("Hub_Driver_", scenario$case_label), 1, 31)
+              if(!sh_name %in% names(wb_topo)) addWorksheet(wb_topo, sh_name)
+              writeData(wb_topo, sh_name, hub_driver_case)
+              has_topo_data <- TRUE
+              
+              p2 <- plot_hub_driver_quadrant(
+                hub_driver_case, 
+                y_label = "Degree",
+                title_suffix = paste0("\nNetwork: ", scenario$case_label, " (Target)")
+              )
+              if (!is.null(p2)) print(p2)
+            }
           }
-        }
-        
-        # D. Generate PDF (Multi-Page)
-        # ----------------------------------------------------------------------
-        if (length(plot_list) > 0) {
-          pdf_path <- file.path(out_dir, paste0(scenario$id, "_Plot_Hub_Driver_Quadrant.pdf"))
-          pdf(pdf_path, width = 10, height = 8) 
           
-          # Print Control first, then Case
-          if (!is.null(plot_list[["Control"]])) print(plot_list[["Control"]])
-          if (!is.null(plot_list[["Case"]])) print(plot_list[["Case"]])
+          # --- PAGE 3: Control - Betweenness ---
+          if (!is.null(topo_ctrl)) {
+            hub_driver_ctrl_bet <- integrate_hub_drivers(spls_drivers, topo_ctrl, topo_col = "Betweenness")
+            if (!is.null(hub_driver_ctrl_bet)) {
+              p3 <- plot_hub_driver_quadrant(
+                hub_driver_ctrl_bet, 
+                y_label = "Betweenness",
+                title_suffix = paste0("\nNetwork: ", scenario$control_label, " (Reference)")
+              )
+              if (!is.null(p3)) print(p3)
+            }
+          }
+          
+          # --- PAGE 4: Case - Betweenness ---
+          if (!is.null(topo_case)) {
+            hub_driver_case_bet <- integrate_hub_drivers(spls_drivers, topo_case, topo_col = "Betweenness")
+            if (!is.null(hub_driver_case_bet)) {
+              p4 <- plot_hub_driver_quadrant(
+                hub_driver_case_bet, 
+                y_label = "Betweenness",
+                title_suffix = paste0("\nNetwork: ", scenario$case_label, " (Target)")
+              )
+              if (!is.null(p4)) print(p4)
+            }
+          }
           
           dev.off()
+          message(sprintf("      [Viz] Saved 4-Page Hub-Driver Report: %s", basename(pdf_path)))
         }
         
-        # E. Differential Edges (Added for completeness)
+        # E. Differential Edges
+        # ----------------------------------------------------------------------
         if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
           addWorksheet(wb_topo, "Differential_Edges")
           writeData(wb_topo, "Differential_Edges", net_res$edges_table)
           has_topo_data <- TRUE
         }
         
+        # SAVE TOPOLOGY WORKBOOK
         if (has_topo_data) {
           saveWorkbook(wb_topo, topo_xlsx_path, overwrite = TRUE)
         }
-      }
+      } 
       
       # --- NETWORK VISUALIZATION ---
       # Generate plots if we have valid results
@@ -332,11 +359,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         
         pdf(viz_path, width = 12, height = 6)
         
-        # We use try to ensure device is closed if plot fails
         try({
-          # We cannot easily side-by-side ggraph objects with par(mfrow), 
-          # so we will plot them on separate pages of the PDF.
-          
           if(sum(net_res$stability$ctrl) > 0) {
             p1 <- plot_network_structure(
               adj_mat = net_res$stability$ctrl, 
