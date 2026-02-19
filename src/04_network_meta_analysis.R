@@ -63,8 +63,8 @@ for (scen in scenarios) {
       # --- ROBUST FILTERING LOGIC ---
       # 1. Edge Category (Best)
       if ("Edge_Category" %in% names(df_net)) {
-        sig_edges <- df_net %>% filter(Edge_Category != "Weak")
-        message(sprintf("   -> Scenario '%s': Filtering via Edge_Category.", label))
+        sig_edges <- df_net %>% filter(Edge_Category != "Weak" & P_Value < 0.05)
+        message(sprintf("   -> Scenario '%s': Filtering via Edge_Category and P_Value < 0.05.", label))
         
         # 2. Significant Boolean (Legacy)
       } else if ("Significant" %in% names(df_net)) {

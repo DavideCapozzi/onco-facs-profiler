@@ -201,7 +201,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         stability_thresh = 0.8,
         label_ctrl = scenario$control_label, 
         label_case = scenario$case_label,
-        magnitude_threshold = edge_threshold_cfg
+        threshold_type = "percentile", 
+        threshold_value = 0.85
       )
       
       if (!is.null(net_res)) {
@@ -269,7 +270,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
               hd_res <- integrate_hub_drivers(spls_drivers, topo, topo_col = metric)
               if (!is.null(hd_res)) {
                 sh_name <- substr(paste0("Hub_Driver_", label, "_", substr(metric,1,3)), 1, 31)
-                if(!sh_name %in% names(wb_topo)) {
+                # Only write to Excel if metric is Degree, avoiding redundant Betweenness sheets
+                if(metric == "Degree" && !sh_name %in% names(wb_topo)) {
                   addWorksheet(wb_topo, sh_name)
                   writeData(wb_topo, sh_name, hd_res)
                 }
@@ -293,6 +295,16 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
           addWorksheet(wb_topo, "Differential_Edges")
           writeData(wb_topo, "Differential_Edges", net_res$edges_table)
+          
+          sig_edges_strict <- net_res$edges_table %>%
+            dplyr::filter(Edge_Category != "Weak" & P_Value < 0.05) %>%
+            dplyr::arrange(P_Value)
+          
+          if (nrow(sig_edges_strict) > 0) {
+            addWorksheet(wb_topo, "Significant_Edges")
+            writeData(wb_topo, "Significant_Edges", sig_edges_strict)
+          }
+          
           has_topo_data <- TRUE
         }
         
@@ -305,14 +317,18 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           dist_pdf_path <- file.path(out_dir, paste0(scenario$id, "_Edge_Distribution.pdf"))
           pdf(dist_pdf_path, width = 8, height = 6)
           
+          thresh_to_plot <- if(!is.null(net_res$applied_threshold)) net_res$applied_threshold else edge_threshold_cfg
+          
           if(sum(abs(net_res$networks$ctrl) > 0) > 0) {
             print(viz_plot_edge_density(net_res$networks$ctrl, 
-                                        threshold = edge_threshold_cfg, 
+                                        adj_mat = net_res$stability$ctrl,
+                                        threshold = thresh_to_plot, 
                                         group_label = scenario$control_label))
           }
           if(sum(abs(net_res$networks$case) > 0) > 0) {
             print(viz_plot_edge_density(net_res$networks$case, 
-                                        threshold = edge_threshold_cfg, 
+                                        adj_mat = net_res$stability$case,
+                                        threshold = thresh_to_plot, 
                                         group_label = scenario$case_label))
           }
           dev.off()
@@ -338,17 +354,42 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         }
         
         # --- 5. Cytoscape Export ---
-        message("      [Export] Generating Rich Cytoscape Tables...")
+        message("      [Export] Generating Rich Cytoscape Tables (Filtered)...")
         cyto_dir <- file.path(out_dir, "cytoscape_export")
         if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
         
+        # Identify significant differential edges to retain in Cytoscape
+        valid_edges <- c()
+        if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
+          sig_edges_df <- net_res$edges_table %>%
+            dplyr::filter(Edge_Category != "Weak" & P_Value < 0.05)
+          
+          if(nrow(sig_edges_df) > 0) {
+            valid_edges <- apply(sig_edges_df, 1, function(r) paste(sort(c(r["Node1"], r["Node2"])), collapse = "~"))
+          }
+        }
+        
         if (sum(net_res$stability$ctrl) > 0) {
           tbl_ctrl <- get_rich_network_table(net_res$stability$ctrl, net_res$networks$ctrl, group_label = scenario$control_label)
-          if (!is.null(tbl_ctrl)) write.csv(tbl_ctrl, file.path(cyto_dir, paste0(scenario$control_label, "_RichTable.csv")), row.names = FALSE)
+          if (!is.null(tbl_ctrl)) {
+            tbl_ctrl <- tbl_ctrl %>%
+              dplyr::mutate(Edge_ID = apply(cbind(Source, Target), 1, function(x) paste(sort(x), collapse = "~"))) %>%
+              dplyr::filter(Edge_ID %in% valid_edges) %>%
+              dplyr::select(-Edge_ID)
+            
+            if(nrow(tbl_ctrl) > 0) write.csv(tbl_ctrl, file.path(cyto_dir, paste0(scenario$control_label, "_RichTable.csv")), row.names = FALSE)
+          }
         }
         if (sum(net_res$stability$case) > 0) {
           tbl_case <- get_rich_network_table(net_res$stability$case, net_res$networks$case, group_label = scenario$case_label)
-          if (!is.null(tbl_case)) write.csv(tbl_case, file.path(cyto_dir, paste0(scenario$case_label, "_RichTable.csv")), row.names = FALSE)
+          if (!is.null(tbl_case)) {
+            tbl_case <- tbl_case %>%
+              dplyr::mutate(Edge_ID = apply(cbind(Source, Target), 1, function(x) paste(sort(x), collapse = "~"))) %>%
+              dplyr::filter(Edge_ID %in% valid_edges) %>%
+              dplyr::select(-Edge_ID)
+            
+            if(nrow(tbl_case) > 0) write.csv(tbl_case, file.path(cyto_dir, paste0(scenario$case_label, "_RichTable.csv")), row.names = FALSE)
+          }
         }
       }
     }

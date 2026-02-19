@@ -1045,22 +1045,29 @@ plot_hub_driver_quadrant <- function(hub_driver_df, y_label = "Degree", title_su
 #' Shows the cutoff threshold relative to the distribution of signal vs noise.
 #' 
 #' @param pcor_mat Numeric matrix of partial correlations.
+#' @param adj_mat Optional. Adjacency matrix (0/1) of stable edges to count actual retained edges.
 #' @param threshold Numeric. The magnitude threshold used for filtering.
 #' @param group_label String. Label for the group (e.g., "Healthy").
 #' @return A ggplot object.
-viz_plot_edge_density <- function(pcor_mat, threshold = 0.15, group_label = "") {
+viz_plot_edge_density <- function(pcor_mat, adj_mat = NULL, threshold = 0.15, group_label = "") {
   
   require(ggplot2)
   
   # Extract upper triangle values (exclude diagonal and duplicates)
   vals <- pcor_mat[upper.tri(pcor_mat)]
-  
-  # Basic Stats
   n_total <- length(vals)
-  n_kept <- sum(abs(vals) >= threshold)
-  pct_kept <- round((n_kept / n_total) * 100, 1)
   
   df_plot <- data.frame(Value = vals)
+  
+  # Dynamic subtitle calculation based on provided adjacency matrix
+  if (!is.null(adj_mat)) {
+    n_stable <- sum(adj_mat[upper.tri(adj_mat)])
+    sub_text <- sprintf("Threshold: |rho| > %.4f | Final Stable Edges: %d", threshold, n_stable)
+  } else {
+    n_kept <- sum(abs(vals) >= threshold)
+    pct_kept <- round((n_kept / n_total) * 100, 1)
+    sub_text <- sprintf("Threshold: |rho| > %.4f (Keeps %.1f%% of raw edges)", threshold, pct_kept)
+  }
   
   p <- ggplot(df_plot, aes(x = Value)) +
     # Density Curve
@@ -1072,13 +1079,16 @@ viz_plot_edge_density <- function(pcor_mat, threshold = 0.15, group_label = "") 
     # Annotation
     labs(
       title = paste("Edge Weight Distribution:", group_label),
-      subtitle = sprintf("Threshold: |rho| > %.2f (Keeps %.1f%% of %d edges)", 
-                         threshold, pct_kept, n_total),
+      subtitle = sub_text,
       x = "Partial Correlation (Shrinkage)",
       y = "Density"
     ) +
-    theme_coda() +
-    xlim(-1, 1) # Partial correlations are bounded -1 to 1
+    theme_bw(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray40")
+    ) +
+    xlim(-1, 1) 
   
   return(p)
 }

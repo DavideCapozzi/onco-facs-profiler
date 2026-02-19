@@ -167,6 +167,16 @@ tryCatch({
             sheet_name <- substr(paste0(scen_id, "_Net"), 1, 31)
             if(!sheet_name %in% names(wb_master)) addWorksheet(wb_master, sheet_name)
             writeData(wb_master, sheet_name, res$network$edges_table)
+            
+            sig_edges_master <- res$network$edges_table %>%
+              dplyr::filter(Edge_Category != "Weak" & P_Value < 0.05) %>%
+              dplyr::arrange(P_Value)
+            
+            if (nrow(sig_edges_master) > 0) {
+              sheet_name_sig <- substr(paste0(scen_id, "_SigNet"), 1, 31)
+              if(!sheet_name_sig %in% names(wb_master)) addWorksheet(wb_master, sheet_name_sig)
+              writeData(wb_master, sheet_name_sig, sig_edges_master)
+            }
           }
         }
         

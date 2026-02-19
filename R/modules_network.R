@@ -120,13 +120,15 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
 #' @param stability_thresh Frequency threshold to keep an edge (e.g., 0.8 = 80%).
 #' @param label_ctrl Label for control group (used for dynamic column naming).
 #' @param label_case Label for case group (used for dynamic column naming).
-#' @param magnitude_threshold Threshold for pcor values
+#' @param threshold_type percentile or []
+#' @param threshold_value Threshold for pcor values
 #' @return List with edge table and network objects.
 run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
                                      seed = 123, n_cores = 1, pvalue_thresh = 0.05, 
                                      stability_thresh = 0.8,
                                      label_ctrl = "Ctrl", label_case = "Case",
-                                     magnitude_threshold = 0.15) {
+                                     threshold_type = "percentile", 
+                                     threshold_value = 0.85) {
   
   requireNamespace("parallel", quietly = TRUE)
   requireNamespace("doParallel", quietly = TRUE)
@@ -193,6 +195,16 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   
   obs_diff <- abs(obs_ctrl - obs_case)
   
+  # --- DYNAMIC THRESHOLD CALCULATION ---
+    if (threshold_type == "percentile") {
+      all_pcor_vals <- c(obs_ctrl[upper.tri(obs_ctrl)], obs_case[upper.tri(obs_case)])
+      actual_thresh <- quantile(abs(all_pcor_vals), probs = threshold_value, na.rm = TRUE)
+      message(sprintf("      [DiffNet] Percentile threshold (%.2f) calculated as |rho| >= %.4f", threshold_value, actual_thresh))
+    } else {
+      actual_thresh <- threshold_value
+      message(sprintf("      [DiffNet] Absolute threshold used: |rho| >= %.4f", actual_thresh))
+    }
+  
   # --- STEP 3: PERMUTATION TEST ---
   message("      [DiffNet] 2/3 Running Permutation Test...")
   
@@ -233,9 +245,9 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
       null_vals <- sapply(null_diffs, function(m) m[i, j])
       p_val <- (sum(null_vals >= obs_val) + 1) / denom
       
-      # --- NEW: BIOLOGICAL CLASSIFICATION LOGIC ---
+      # --- BIOLOGICAL CLASSIFICATION LOGIC ---
       # 1. Magnitude Check (At least one must be biologically relevant)
-      is_relevant <- (abs(w_ctrl) >= magnitude_threshold) | (abs(w_case) >= magnitude_threshold)
+      is_relevant <- (abs(w_ctrl) >= actual_thresh) | (abs(w_case) >= actual_thresh)
       
       category <- "Weak"
       if (is_relevant) {
@@ -243,12 +255,12 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
         same_sign <- (sign(w_ctrl) == sign(w_case))
         
         if (!same_sign) {
-          # Signs oppose: SWITCH
-          category <- "Switch"
+          # Signs oppose: INVERTED
+          category <- "Inverted"
         } else {
           # Signs agree: Check if conserved or specific
           # Conserved if BOTH are above threshold
-          if (abs(w_ctrl) >= magnitude_threshold && abs(w_case) >= magnitude_threshold) {
+          if (abs(w_ctrl) >= actual_thresh && abs(w_case) >= actual_thresh) {
             category <- "Conserved"
           } else {
             category <- "Specific" # One is strong, one is weak (but same sign/zero)
@@ -279,7 +291,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     
     # Sort: Prioritize Switches and Significant changes
     res_df <- res_df %>% 
-      arrange(factor(Edge_Category, levels = c("Switch", "Specific", "Conserved", "Weak")), P_Value)
+      arrange(factor(Edge_Category, levels = c("Inverted", "Specific", "Conserved", "Weak")), P_Value)
     
     # --- DYNAMIC RENAMING (Existing logic) ---
     colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Pcor_", label_ctrl)
@@ -300,7 +312,8 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   return(list(
     edges_table = res_df,
     networks = list(ctrl = obs_ctrl, case = obs_case),
-    stability = list(ctrl = agg_ctrl$adj, case = agg_case$adj)
+    stability = list(ctrl = agg_ctrl$adj, case = agg_case$adj),
+    applied_threshold = actual_thresh
   ))
 }
 
@@ -508,4 +521,44 @@ get_rich_network_table <- function(adj_mat, weight_mat, group_label = "Unknown")
     select(-matches("Eigen_Centrality")) # Optional: keep or remove based on preference
   
   return(rich_table)
+}
+
+#' @title Integrate Global Hub and Driver Roles
+#' @description Merges PLS-DA drivers with comprehensive Network Topology metrics.
+#' @param drivers_df Dataframe output from extract_plsda_loadings.
+#' @param topo_df Dataframe output from calculate_node_topology.
+#' @return A unified dataframe with topological metrics and overall Role assignment.
+integrate_global_hub_roles <- function(drivers_df, topo_df) {
+  
+  if (is.null(drivers_df) || nrow(drivers_df) == 0) return(NULL)
+  if (is.null(topo_df) || nrow(topo_df) == 0) return(NULL)
+  
+  # Select highest importance per marker across components
+  df_drv <- drivers_df %>%
+    dplyr::group_by(Marker) %>%
+    dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
+    dplyr::ungroup()
+  
+  # Merge stats with topology
+  merged <- merge(df_drv, topo_df, by.x = "Marker", by.y = "Node")
+  if (nrow(merged) == 0) return(NULL)
+  
+  # Calculate Medians for generic classification
+  imp_med <- median(merged$Importance, na.rm = TRUE)
+  deg_med <- median(merged$Degree, na.rm = TRUE)
+  bet_med <- median(merged$Betweenness, na.rm = TRUE)
+  
+  # Define a holistic biological role: 
+  # Master_Regulator if it drives PLS-DA AND has high network centrality
+  merged$Overall_Role <- dplyr::case_when(
+    merged$Importance >= imp_med & (merged$Degree >= deg_med | merged$Betweenness >= bet_med) ~ "Master_Regulator",
+    merged$Importance >= imp_med & merged$Degree < deg_med & merged$Betweenness < bet_med     ~ "Solo_Driver",
+    merged$Importance < imp_med & (merged$Degree >= deg_med | merged$Betweenness >= bet_med)  ~ "Structural_Connector",
+    TRUE ~ "Background"
+  )
+  
+  # Order nicely for Excel
+  merged <- merged %>% dplyr::arrange(dplyr::desc(Importance))
+  
+  return(merged)
 }
