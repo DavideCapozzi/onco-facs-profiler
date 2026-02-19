@@ -245,6 +245,10 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
       null_vals <- sapply(null_diffs, function(m) m[i, j])
       p_val <- (sum(null_vals >= obs_val) + 1) / denom
       
+      # Calculate raw correlation p-values on the fly (Pearson)
+      test_ctrl <- tryCatch(suppressWarnings(cor.test(mat_ctrl[,i], mat_ctrl[,j], method = "pearson")), error = function(e) list(p.value = NA))
+      test_case <- tryCatch(suppressWarnings(cor.test(mat_case[,i], mat_case[,j], method = "pearson")), error = function(e) list(p.value = NA))
+      
       # --- BIOLOGICAL CLASSIFICATION LOGIC ---
       # 1. Magnitude Check (At least one must be biologically relevant)
       is_relevant <- (abs(w_ctrl) >= actual_thresh) | (abs(w_case) >= actual_thresh)
@@ -275,11 +279,13 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
         Weight_Case = w_case,    
         Cor_Ctrl = raw_cor_ctrl[i,j],   
         Cor_Case = raw_cor_case[i,j],   
+        Pval_Cor_Ctrl = test_ctrl$p.value,
+        Pval_Cor_Case = test_case$p.value,
         Is_Stable_Ctrl = agg_ctrl$adj[i,j] == 1,
         Is_Stable_Case = agg_case$adj[i,j] == 1,
         Diff_Score = obs_val,
         P_Value = p_val,
-        Edge_Category = category, # NEW COLUMN
+        Edge_Category = category,
         stringsAsFactors = FALSE
       )
     }
@@ -301,6 +307,10 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     colnames(res_df)[colnames(res_df) == "Cor_Ctrl"] <- paste0("Cor_", label_ctrl)
     colnames(res_df)[colnames(res_df) == "Cor_Case"] <- paste0("Cor_", label_case)
     
+    # Rename Raw P-Values
+    colnames(res_df)[colnames(res_df) == "Pval_Cor_Ctrl"] <- paste0("Pval_Cor_", label_ctrl)
+    colnames(res_df)[colnames(res_df) == "Pval_Cor_Case"] <- paste0("Pval_Cor_", label_case)
+    
     # Rename Stability columns
     colnames(res_df)[colnames(res_df) == "Is_Stable_Ctrl"] <- paste0("Is_Stable_", label_ctrl)
     colnames(res_df)[colnames(res_df) == "Is_Stable_Case"] <- paste0("Is_Stable_", label_case)
@@ -312,6 +322,7 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   return(list(
     edges_table = res_df,
     networks = list(ctrl = obs_ctrl, case = obs_case),
+    raw_cor = list(ctrl = raw_cor_ctrl, case = raw_cor_case),
     stability = list(ctrl = agg_ctrl$adj, case = agg_case$adj),
     applied_threshold = actual_thresh
   ))

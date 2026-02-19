@@ -320,16 +320,37 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           thresh_to_plot <- if(!is.null(net_res$applied_threshold)) net_res$applied_threshold else edge_threshold_cfg
           
           if(sum(abs(net_res$networks$ctrl) > 0) > 0) {
+            # Plot 1: Standard Partial Correlation Density
             print(viz_plot_edge_density(net_res$networks$ctrl, 
                                         adj_mat = net_res$stability$ctrl,
                                         threshold = thresh_to_plot, 
                                         group_label = scenario$control_label))
+            
+            # Plot 2: Overlay Partial vs Raw Pearson Density
+            if (!is.null(net_res$raw_cor$ctrl)) {
+              print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$ctrl, 
+                                                  cor_mat = net_res$raw_cor$ctrl,
+                                                  adj_mat = net_res$stability$ctrl,
+                                                  threshold = thresh_to_plot, 
+                                                  group_label = scenario$control_label))
+            }
           }
+          
           if(sum(abs(net_res$networks$case) > 0) > 0) {
+            # Plot 1: Standard Partial Correlation Density
             print(viz_plot_edge_density(net_res$networks$case, 
                                         adj_mat = net_res$stability$case,
                                         threshold = thresh_to_plot, 
                                         group_label = scenario$case_label))
+            
+            # Plot 2: Overlay Partial vs Raw Pearson Density
+            if (!is.null(net_res$raw_cor$case)) {
+              print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$case, 
+                                                  cor_mat = net_res$raw_cor$case,
+                                                  adj_mat = net_res$stability$case,
+                                                  threshold = thresh_to_plot, 
+                                                  group_label = scenario$case_label))
+            }
           }
           dev.off()
           message(sprintf("      [Viz] Saved Edge Distribution: %s", basename(dist_pdf_path)))

@@ -1092,3 +1092,61 @@ viz_plot_edge_density <- function(pcor_mat, adj_mat = NULL, threshold = 0.15, gr
   
   return(p)
 }
+
+#' @title Plot Partial vs Raw Correlation Density Overlay
+#' @description 
+#' Visualizes the distribution of partial correlation values (Shrinkage) overlaid
+#' on top of the raw Pearson correlation values to demonstrate the shrinkage effect.
+#' 
+#' @param pcor_mat Numeric matrix of partial correlations.
+#' @param cor_mat Numeric matrix of raw Pearson correlations.
+#' @param adj_mat Optional. Adjacency matrix (0/1) of stable edges.
+#' @param threshold Numeric. The magnitude threshold used for filtering.
+#' @param group_label String. Label for the group (e.g., "Healthy").
+#' @return A ggplot object.
+viz_plot_edge_density_overlay <- function(pcor_mat, cor_mat, adj_mat = NULL, threshold = 0.15, group_label = "") {
+  
+  require(ggplot2)
+  
+  vals_pcor <- pcor_mat[upper.tri(pcor_mat)]
+  vals_cor <- cor_mat[upper.tri(cor_mat)]
+  
+  df_plot <- rbind(
+    data.frame(Value = vals_cor, Metric = "Pearson (Raw)"),
+    data.frame(Value = vals_pcor, Metric = "Partial (Shrinkage)")
+  )
+  
+  # Set factor levels so Pearson renders behind Partial
+  df_plot$Metric <- factor(df_plot$Metric, levels = c("Pearson (Raw)", "Partial (Shrinkage)"))
+  
+  if (!is.null(adj_mat)) {
+    n_stable <- sum(adj_mat[upper.tri(adj_mat)])
+    sub_text <- sprintf("Threshold: |rho| > %.4f | Final Stable Edges: %d", threshold, n_stable)
+  } else {
+    pct_kept <- round((sum(abs(vals_pcor) >= threshold) / length(vals_pcor)) * 100, 1)
+    sub_text <- sprintf("Threshold: |rho| > %.4f (Keeps %.1f%% of Partial edges)", threshold, pct_kept)
+  }
+  
+  p <- ggplot(df_plot, aes(x = Value, fill = Metric, color = Metric)) +
+    geom_density(alpha = 0.4, size = 0.8) +
+    geom_vline(xintercept = c(-threshold, threshold), linetype = "dashed", color = "red", size = 0.8) +
+    scale_fill_manual(values = c("Pearson (Raw)" = "gray60", "Partial (Shrinkage)" = "steelblue")) +
+    scale_color_manual(values = c("Pearson (Raw)" = "gray40", "Partial (Shrinkage)" = "#1F4E79")) +
+    labs(
+      title = paste("Correlation Distribution Overlay:", group_label),
+      subtitle = sub_text,
+      x = "Correlation Value",
+      y = "Density",
+      fill = "Metric",
+      color = "Metric"
+    ) +
+    theme_bw(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray40"),
+      legend.position = "bottom"
+    ) +
+    xlim(-1, 1) 
+  
+  return(p)
+}
