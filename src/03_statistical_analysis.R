@@ -13,8 +13,7 @@ suppressPackageStartupMessages({
 
 source("R/utils_io.R")          
 source("R/modules_hypothesis.R") 
-source("R/modules_multivariate.R")   
-source("R/modules_interpretation.R")
+source("R/modules_multivariate.R")
 source("R/modules_viz.R") 
 
 message("\n=== PIPELINE STEP 3: STATISTICAL ANALYSIS ===")
@@ -32,7 +31,6 @@ DATA <- readRDS(input_file)
 df_global <- DATA$hybrid_data_z
 safe_markers <- DATA$hybrid_markers
 raw_matrix <- DATA$raw_matrix
-ilr_list <- DATA$ilr_balances
 meta_viz <- DATA$metadata 
 
 # 2. Dynamic Selection Logic

@@ -21,10 +21,6 @@ message("\n=== PIPELINE STEP 1: INGESTION + QC + HYBRID TRANSFORM ===")
 # ------------------------------------------------------------------------------
 config <- load_config("config/global_params.yml")
 
-if (is.null(config$hybrid_groups)) {
-  stop("[FATAL] 'hybrid_groups' not found in config. Please update global_params.yml.")
-}
-
 raw_data <- load_raw_data(config)
 
 # 2. Setup Initial Matrices
@@ -146,7 +142,7 @@ if (config$qc$remove_outliers) {
   message("   [QC-B] Generating geometric proxy for Outlier Detection...")
   
   # 1. Generate Proxy (Fast Mode) on CLEAN data
-  proxy_results <- perform_hybrid_transformation(mat_clean_basic, config, mode = "fast")
+  proxy_results <- perform_data_transformation(mat_clean_basic, config, mode = "fast")
   mat_proxy <- proxy_results$hybrid_data_z
   
   # 2. Detect Outliers using the Proxy
@@ -278,13 +274,12 @@ if (length(impute_indices) > 0) {
   message("\n[Impute] No missing values detected in the filtered dataset. BPCA step will be skipped internally.")
 }
 
-message("[CoDa] Running Final Hybrid Transformation (Complete Mode) on clean data...")
-transform_results <- perform_hybrid_transformation(mat_raw, config, mode = "complete")
+message("[Transform] Running Final Data Transformation (Complete Mode) on clean data...")
+transform_results <- perform_data_transformation(mat_raw, config, mode = "complete")
 
 # Extract results
 mat_hybrid_raw <- transform_results$hybrid_data_raw
 mat_hybrid_z   <- transform_results$hybrid_data_z
-ilr_list       <- transform_results$ilr_balances
 final_markers  <- transform_results$hybrid_markers
 
 # 5. Final Safety Polish
@@ -300,13 +295,6 @@ if (any(is.na(mat_hybrid_z))) {
   })
 }
 
-# Check ILR balances
-for (g_name in names(ilr_list)) {
-  if (any(is.na(ilr_list[[g_name]]))) {
-    ilr_list[[g_name]][is.na(ilr_list[[g_name]])] <- 0 
-  }
-}
-
 # 6. Save Final Output
 # ------------------------------------------------------------------------------
 df_hybrid_raw <- cbind(raw_data[, meta_cols], as.data.frame(mat_hybrid_raw))
@@ -319,7 +307,6 @@ processed_data <- list(
   hybrid_markers  = final_markers,
   hybrid_data_raw = df_hybrid_raw,
   hybrid_data_z   = df_hybrid_z,
-  ilr_balances    = ilr_list,
   config          = config
 )
 

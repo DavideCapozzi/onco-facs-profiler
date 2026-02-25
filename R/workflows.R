@@ -198,7 +198,6 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         seed = seed_cfg, 
         n_cores = n_cores_cfg, 
         pvalue_thresh = pval_threshold_cfg,
-        stability_thresh = 0.8,
         label_ctrl = scenario$control_label, 
         label_case = scenario$case_label,
         threshold_type = "percentile", 

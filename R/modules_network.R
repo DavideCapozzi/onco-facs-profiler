@@ -124,8 +124,7 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
 #' @param threshold_value Threshold for pcor values
 #' @return List with edge table and network objects.
 run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
-                                     seed = 123, n_cores = 1, pvalue_thresh = 0.05, 
-                                     stability_thresh = 0.8,
+                                     seed = 123, n_cores = 1, pvalue_thresh = 0.05,
                                      label_ctrl = "Ctrl", label_case = "Case",
                                      threshold_type = "percentile", 
                                      threshold_value = 0.85) {

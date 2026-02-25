@@ -1,25 +1,13 @@
 # R/modules_coda.R
 # ==============================================================================
-# COMPOSITIONAL DATA ANALYSIS MODULE
-# Description: Pure functions for Zero Replacement (CZM), Imputation, and CLR/ILR.
-# Dependencies: zCompositions, dplyr, compositions, pcaMethods
+# DATA TRANSFORMATION MODULE
+# Description: Handling imputation (BPCA) and transformation (Logit).
+# Dependencies: dplyr, pcaMethods
 # ==============================================================================
 
-library(zCompositions)
 library(dplyr)
-library(compositions)
 
 # --- HELPER FUNCTIONS ---
-
-#' @title Calculate Geometric Mean (Safe)
-#' @description Computes geometric mean handling positive values only.
-#' @param x Numeric vector.
-#' @return Numeric scalar.
-calc_gmean_safe <- function(x) {
-  vals <- x[!is.na(x) & x > 0]
-  if(length(vals) == 0) return(1e-6) # Fallback for empty/zero vectors
-  return(exp(mean(log(vals))))
-}
 
 #' @title Internal Median Fallback Helper
 #' @description Fills NAs with column medians. Used when BPCA fails.
@@ -34,151 +22,6 @@ calc_gmean_safe <- function(x) {
 }
 
 # --- MAIN FUNCTIONS ---
-
-#' @title Zero Replacement via Count Zero Multiplicative (CZM) method
-#' @description 
-#' Replaces zeros in a compositional matrix using Bayesian-Multiplicative replacement.
-#' Handles the "NA conflict" by temporarily masking NAs.
-coda_replace_zeros <- function(mat) {
-  
-  if (!is.matrix(mat)) stop("Input must be a matrix.")
-  
-  if (!any(mat == 0, na.rm = TRUE)) {
-    message("   [CoDa] No zeros detected. Skipping zero replacement.")
-    return(mat)
-  }
-  
-  message("   [CoDa] Zeros detected. Applying zCompositions::cmultRepl (CZM)...")
-  
-  na_locs <- is.na(mat)
-  has_na <- any(na_locs)
-  mat_temp <- mat
-  
-  # 1. Check for Mixed Zero/NA Rows (Ghost Effect Risk)
-  # If a sample has both 0s and NAs, the temporary imputation of NAs 
-  # might slightly bias the zero replacement (geometric mean shift).
-  if (has_na) {
-    n_mixed <- sum(rowSums(mat == 0, na.rm = TRUE) > 0 & rowSums(na_locs) > 0)
-    
-    if (n_mixed > 0) {
-      warning(sprintf(
-        "[CoDa] Warning: %d samples contain both Zeros and NAs in the same group.\n       Temporary NA masking may induce slight bias in zero replacement (Ghost Effect).", 
-        n_mixed
-      ))
-    }
-  }
-  
-  # 2. Temporary Fill (if NAs exist) to allow cmultRepl to run on Zeros
-  if (has_na) {
-    for(j in 1:ncol(mat_temp)) {
-      if(any(na_locs[,j])) {
-        fill_val <- calc_gmean_safe(mat_temp[,j])
-        mat_temp[na_locs[,j], j] <- fill_val
-      }
-    }
-  }
-  
-  # 3. Apply cmultRepl
-  tryCatch({
-    clean_mat <- zCompositions::cmultRepl(
-      X = mat_temp,
-      label = 0,
-      method = "CZM", 
-      output = "p-counts",
-      suppress.print = TRUE 
-    )
-    
-    # 4. Restore NAs (Actual imputation happens in next step)
-    if (has_na) {
-      clean_mat[na_locs] <- NA
-    }
-    
-    return(clean_mat)
-    
-  }, error = function(e) {
-    stop(paste("Zero replacement via CZM failed:", e$message))
-  })
-}
-
-#' @title Imputation for Remaining NAs
-#' @description 
-#' Handles remaining NAs with Multiplicative Replacement (preserving ratios).
-impute_nas_simple <- function(mat) {
-  
-  if (!any(is.na(mat))) return(mat)
-  
-  message("   [CoDa] Imputing remaining NAs using Multiplicative Replacement...")
-  
-  tryCatch({
-    # imp.missing = TRUE imputes NAs specifically
-    result <- zCompositions::multRepl(X = mat, label = NA, imp.missing = TRUE)
-    return(as.matrix(result))
-    
-  }, error = function(e) {
-    warning(paste("multRepl failed, using geometric mean fallback. Error:", e$message))
-    
-    mat_fixed <- mat
-    for (j in 1:ncol(mat_fixed)) {
-      na_idx <- is.na(mat_fixed[,j])
-      if (any(na_idx)) {
-        # Refactored: Use shared helper logic
-        mat_fixed[na_idx, j] <- calc_gmean_safe(mat_fixed[,j])
-      }
-    }
-    return(mat_fixed)
-  })
-}
-
-#' @title Centered Log-Ratio Transformation (CLR)
-#' @description Projects compositional data from simplex to real space (Euclidean).
-coda_transform_clr <- function(mat) {
-  
-  if (any(mat <= 0, na.rm = TRUE)) stop("CLR input must be strictly positive (no zeros).")
-  
-  message("   [CoDa] Applying CLR transformation...")
-  
-  # Optimization: Use vectorized math to prevent 'apply' dimension dropping on 1-col matrices
-  # Algebra: log(x / gmean(x)) == log(x) - mean(log(x))
-  log_mat <- log(mat)
-  
-  # Calculate row means (equivalent to log of geometric means), ignoring NAs
-  row_means <- rowMeans(log_mat, na.rm = TRUE)
-  
-  # R handles row-wise subtraction via recycling
-  clr_mat <- log_mat - row_means
-  
-  return(clr_mat)
-}
-
-#' @title Compute Local ILR for Compositional Subgroups
-#' @description 
-#' Iterates through defined groups. If a group has >1 marker, 
-#' calculates Isometric Log-Ratio coordinates.
-coda_compute_local_ilr <- function(mat_imputed, hybrid_groups) {
-  
-  if (any(mat_imputed <= 0, na.rm = TRUE)) stop("ILR input must be strictly positive.")
-  
-  ilr_results <- list()
-  message("   [CoDa] Computing Local ILR balances for sub-compositions...")
-  
-  for (group_name in names(hybrid_groups)) {
-    target_mks <- hybrid_groups[[group_name]]
-    present_mks <- intersect(target_mks, colnames(mat_imputed))
-    
-    if (length(present_mks) < 2) next
-    
-    mat_sub <- mat_imputed[, present_mks, drop = FALSE]
-    
-    ilr_obj <- compositions::ilr(compositions::acomp(mat_sub))
-    ilr_mat <- as.matrix(ilr_obj)
-    rownames(ilr_mat) <- rownames(mat_imputed)
-    
-    ilr_results[[group_name]] <- ilr_mat
-    message(sprintf("      -> '%s': Computed %d ILR balances.", group_name, ncol(ilr_mat)))
-  }
-  
-  return(ilr_results)
-}
 
 #' @title Robust Logit Transformation
 #' @description 
@@ -195,26 +38,22 @@ coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage")
   
   # 1. Normalize Scale
   if (input_type == "percentage") {
-    # Check consistency
     if (any(mat > 100, na.rm = TRUE)) {
-      stop("[CoDa] Critical Error: Values > 100 detected in percentage mode.")
+      stop("[Transform] Critical Error: Values > 100 detected in percentage mode.")
     }
     p <- mat / 100
   } else {
-    # Proportion mode checks
     if (any(mat > 1.0 + epsilon, na.rm = TRUE)) {
-      stop("[CoDa] Critical Error: Values > 1.0 detected in proportion mode.")
+      stop("[Transform] Critical Error: Values > 1.0 detected in proportion mode.")
     }
   }
   
   # 2. Boundary Protection (Clamping)
-  # Ensure p is strictly within (0, 1) exclusive
   n_low  <- sum(p < epsilon, na.rm = TRUE)
   n_high <- sum(p > (1 - epsilon), na.rm = TRUE)
   
   if (n_low > 0 || n_high > 0) {
-    # Optional: Log clamping actions if needed
-    message(sprintf("   [CoDa] Clamped %d boundary values.", n_low + n_high))
+    message(sprintf("   [Transform] Clamped %d boundary values.", n_low + n_high))
   }
   
   p[p < epsilon] <- epsilon
@@ -226,13 +65,7 @@ coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage")
 }
 
 #' @title Bayesian PCA Imputation (Robust & Fail-Safe)
-#' @description 
-#' Imputes missing values using Bayesian PCA.
-#' Implements a multi-stage safety mechanism:
-#' 1. Ignores strictly constant columns.
-#' 2. Catches errors/ambiguities in kEstimate (CV).
-#' 3. Catches errors in PCA execution.
-#' 
+#' @description Imputes missing values using Bayesian PCA.
 #' @param mat Numeric matrix (samples x markers).
 #' @param nPcs Number of components. "auto" uses kEstimate (CV).
 #' @param seed Integer. Seed for reproducibility.
@@ -240,7 +73,6 @@ coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage")
 #' @export
 impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
   
-  # 0. Basic Validation
   if (!any(is.na(mat)) && !any(is.infinite(mat))) return(mat)
   
   if (nrow(mat) < 5 || ncol(mat) < 2) {
@@ -250,11 +82,8 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
   
   mat[is.infinite(mat)] <- NA
   
-  if (!requireNamespace("pcaMethods", quietly = TRUE)) {
-    stop("Package 'pcaMethods' required.")
-  }
+  if (!requireNamespace("pcaMethods", quietly = TRUE)) stop("Package 'pcaMethods' required.")
   
-  # 1. Pre-Processing: Handle Constant Columns
   vars <- apply(mat, 2, var, na.rm = TRUE)
   is_const <- !is.na(vars) & (vars < 1e-12)
   const_cols <- names(which(is_const))
@@ -267,12 +96,10 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
     return(.impute_fallback_median(mat))
   }
   
-  # 2. Estimate K (Cross-Validation) - The "Fragile" Step
-  # Define the mathematical hard limit: min(n, p) - 1
   hard_limit_k <- min(nrow(mat_bpca_in), ncol(mat_bpca_in)) - 1
   if (hard_limit_k < 1) hard_limit_k <- 1
   
-  k_used <- 2 # Default safe value
+  k_used <- 2 
   
   if (is.null(nPcs) || nPcs == "auto") {
     tryCatch({
@@ -284,44 +111,26 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
       })
       suggested_k <- k_est$bestNPcs
       
-      # --- SMART FIX: Handling Ambiguity ---
-      # Case 1: kEstimate returns multiple values (e.g., 4, 5) -> Take min
       if (length(suggested_k) > 1) {
         k_used <- min(suggested_k)
-        warning(sprintf("   [Impute] kEstimate ambiguous (returned %s). Using conservative K=%d.", 
-                        paste(suggested_k, collapse=","), k_used))
-        
-        # Case 2: kEstimate returns invalid/null -> Fallback to 2
+        warning(sprintf("   [Impute] kEstimate ambiguous. Using conservative K=%d.", k_used))
       } else if (length(suggested_k) == 0 || is.na(suggested_k)) {
-        warning("[Impute] kEstimate returned NA/NULL. Defaulting to K=2.")
         k_used <- 2
-        
-        # Case 3: kEstimate > hard limit -> Clamp
       } else if (suggested_k > hard_limit_k) {
-        warning(sprintf("   [Impute] kEstimate returned invalid K=%d (Max allowed=%d). Clamping.", 
-                        suggested_k, hard_limit_k))
         k_used <- hard_limit_k
-        
-        # Case 4: Valid single K
       } else {
         k_used <- suggested_k
       }
       
     }, error = function(e) {
-      warning(sprintf("   [Impute] kEstimate (CV) failed: '%s'. Defaulting to K=2.", e$message))
       k_used <<- 2 
     })
   } else {
     k_used <- as.numeric(nPcs)
   }
   
-  # --- FINAL SAFETY CLAMP ---
-  if (k_used > hard_limit_k) {
-    message(sprintf("   [Impute] Clamping K from %d to %d (max rank).", k_used, hard_limit_k))
-    k_used <- hard_limit_k
-  }
+  if (k_used > hard_limit_k) k_used <- hard_limit_k
   
-  # 3. Run BPCA (The Execution)
   mat_bpca_out <- mat_bpca_in 
   
   tryCatch({
@@ -330,11 +139,10 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
     mat_bpca_out <- as.matrix(pcaMethods::completeObs(res_bpca))
     
   }, error = function(e) {
-    warning(sprintf("   [Impute] BPCA execution failed (K=%d): '%s'. Applying Median Fallback.", k_used, e$message))
+    warning(sprintf("   [Impute] BPCA execution failed. Applying Median Fallback."))
     mat_bpca_out <<- .impute_fallback_median(mat_bpca_in)
   })
   
-  # 4. Reconstruct Full Matrix
   mat_final <- mat 
   mat_final[, var_cols] <- mat_bpca_out
   
@@ -349,156 +157,96 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
   return(mat_final)
 }
 
-#' @title Perform Hybrid Transformation Pipeline
+#' @title Perform Data Transformation Pipeline
 #' @description 
 #' Orchestrates the transformation:
-#' - Track A (Compositional): CZM -> CLR -> ILR (Scale invariant)
-#' - Track B (Functional): Epsilon -> Logit (Scale sensitive) -> BPCA
+#' - Handles LOD (Limit of Detection) Zeros
+#' - Applies Logit transformation (if enabled via config)
+#' - Performs BPCA Imputation
+#' - Z-Score Standardization
 #' @export
-perform_hybrid_transformation <- function(mat_raw, config, mode = "complete") {
+perform_data_transformation <- function(mat_raw, config, mode = "complete") {
   
   if (!mode %in% c("complete", "fast")) stop("Mode must be 'complete' or 'fast'.")
   
-  # Retrieve settings with defaults
   eps_val <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
   input_fmt <- if(!is.null(config$input_format)) config$input_format else "percentage"
   
-  message(sprintf("\n[CoDa] Starting Hybrid Strategy (%s mode). Input Format: %s...", mode, input_fmt))
+  # Future-proof architecture: check if transformation method is defined, default to logit
+  trans_method <- if(!is.null(config$transformation$method)) config$transformation$method else "logit"
+  
+  message(sprintf("\n[Transform] Starting Strategy (%s mode). Method: %s. Input Format: %s...", mode, trans_method, input_fmt))
   
   rn_safe <- rownames(mat_raw)
-  all_current_markers <- colnames(mat_raw)
+  mat_trans <- NULL
   
-  # Define Tracks
-  comp_markers_list <- unique(unlist(config$hybrid_groups))
-  comp_markers <- intersect(all_current_markers, comp_markers_list)
-  func_markers <- setdiff(all_current_markers, comp_markers)
-  
-  if (length(func_markers) > 0) {
-    message(paste("[CoDa] Functional Markers (Logit Track):", paste(func_markers, collapse=", ")))
+  # Remove 100% NA columns
+  na_counts <- colSums(is.na(mat_raw))
+  empty_cols <- which(na_counts == nrow(mat_raw))
+  if (length(empty_cols) > 0) {
+    mat_raw <- mat_raw[, -empty_cols, drop = FALSE]
   }
   
-  mat_comp_trans <- NULL
-  mat_func_trans <- NULL
-  ilr_results <- list()
-  
-  # --- TRACK A: Compositional Markers (CLR) ---
-  if (length(comp_markers) > 0) {
-    if (mode == "complete") message("   [Track A] Processing Compositional Groups (CZM -> CLR)...")
-    mat_comp_raw <- mat_raw[, comp_markers, drop = FALSE]
+  if (ncol(mat_raw) > 0) {
+    mat_lod <- mat_raw
     
-    # Remove 100% NA columns
-    na_counts <- colSums(is.na(mat_comp_raw))
-    empty_cols <- which(na_counts == nrow(mat_comp_raw))
-    if (length(empty_cols) > 0) {
-      mat_comp_raw <- mat_comp_raw[, -empty_cols, drop = FALSE]
-    }
-    
-    if (ncol(mat_comp_raw) == 1) {
-      message(sprintf("   [CoDa] Group reduced to 1 marker (%s). Moving to Functional Track.", colnames(mat_comp_raw)))
-      # Move marker to functional track dynamically
-      func_markers <- c(func_markers, colnames(mat_comp_raw))
-      mat_comp_trans <- NULL 
-    } else if (ncol(mat_comp_raw) > 0) {
+    if (trans_method == "logit") {
+      # Handle Zeros / LOD specifically for logit
       if (mode == "complete") {
-        # CZM handles zeros. It works on counts/proportions. 
-        # Since CLR deals with ratios, 0-100 scale is mathematically fine here.
-        mat_comp_clean <- coda_replace_zeros(mat_comp_raw)
-        if (any(is.na(mat_comp_clean))) {
-          mat_comp_clean <- impute_nas_simple(mat_comp_clean)
-        }
-      } else {
-        mat_comp_clean <- mat_comp_raw
-        mat_comp_clean[mat_comp_clean <= 0 | is.na(mat_comp_clean)] <- eps_val
-      }
-      rownames(mat_comp_clean) <- rn_safe 
-      
-      mat_comp_trans <- coda_transform_clr(mat_comp_clean)
-      
-      if (mode == "complete") {
-        ilr_results <- coda_compute_local_ilr(mat_comp_clean, config$hybrid_groups)
-      }
-    }
-  }
-  
-  # --- TRACK B: Functional Markers (Logit) ---
-  # Re-evaluate markers in case some moved from Track A
-  func_markers <- intersect(func_markers, colnames(mat_raw)) 
-  
-  if (length(func_markers) > 0) {
-    if (mode == "complete") message("   [Track B] Processing Functional Markers (LOD -> Logit -> BPCA)...")
-    mat_func_raw <- mat_raw[, func_markers, drop = FALSE]
-    
-    # Remove 100% NA columns
-    na_counts <- colSums(is.na(mat_func_raw))
-    empty_cols <- which(na_counts == nrow(mat_func_raw))
-    if (length(empty_cols) > 0) {
-      mat_func_raw <- mat_func_raw[, -empty_cols, drop = FALSE]
-    }
-    
-    if (ncol(mat_func_raw) > 0) {
-      mat_func_lod <- mat_func_raw
-      
-      # Handle Zeros / LOD 
-      # Note: We apply LOD replacement based on the raw scale provided
-      if (mode == "complete") {
-        mins <- apply(mat_func_lod, 2, function(x) {
+        mins <- apply(mat_lod, 2, function(x) {
           pos <- x[x > 0 & !is.na(x)]
-          # Safety for empty/all-zero cols
           if(length(pos) == 0) return(eps_val)
           return(min(pos) / 2)
         })
-        for (j in 1:ncol(mat_func_lod)) {
-          zeros <- which(mat_func_lod[, j] == 0 & !is.na(mat_func_lod[, j]))
-          if (length(zeros) > 0) mat_func_lod[zeros, j] <- mins[j]
+        for (j in 1:ncol(mat_lod)) {
+          zeros <- which(mat_lod[, j] == 0 & !is.na(mat_lod[, j]))
+          if (length(zeros) > 0) mat_lod[zeros, j] <- mins[j]
         }
       } else {
-        # Fast mode: just clamp
-        mat_func_lod[mat_func_lod <= 0] <- eps_val 
+        mat_lod[mat_lod <= 0] <- eps_val 
       }
       
-      # Apply Logit with explicit scale handling
-      mat_func_logit <- coda_transform_logit(
-        mat = mat_func_lod, 
+      # Apply Logit
+      mat_transformed <- coda_transform_logit(
+        mat = mat_lod, 
         epsilon = eps_val, 
-        input_type = input_fmt # Passed from config
+        input_type = input_fmt 
       )
-      
-      if (mode == "complete") {
-        seed_val <- if(!is.null(config$stats$seed)) config$stats$seed else 123
-        mat_func_trans <- impute_matrix_bpca(mat_func_logit, nPcs = "auto", seed = seed_val)
-      } else {
-        mat_func_trans <- mat_func_logit
-      }
-      rownames(mat_func_trans) <- rn_safe
+    } else if (trans_method == "none") {
+      # Pass-through for unbounded data (e.g. pg/mL Cytokines)
+      mat_transformed <- mat_lod
+    } else {
+      stop(sprintf("[Transform] Unknown transformation method: %s", trans_method))
     }
+    
+    # Imputation
+    if (mode == "complete") {
+      seed_val <- if(!is.null(config$stats$seed)) config$stats$seed else 123
+      mat_trans <- impute_matrix_bpca(mat_transformed, nPcs = "auto", seed = seed_val)
+    } else {
+      mat_trans <- mat_transformed
+    }
+    rownames(mat_trans) <- rn_safe
   }
   
-  # --- MERGE & FINALIZE ---
-  list_parts <- list()
-  if (!is.null(mat_comp_trans)) list_parts[[1]] <- mat_comp_trans
-  if (!is.null(mat_func_trans)) list_parts[[2]] <- mat_func_trans
+  if (is.null(mat_trans)) stop("[FATAL] No data remaining after filtering.")
   
-  if (length(list_parts) == 0) stop("[FATAL] No data remaining after filtering.")
+  mat_final_raw <- mat_trans[, sort(colnames(mat_trans)), drop = FALSE]
+  mat_final_z <- NULL
   
-  mat_hybrid_raw <- do.call(cbind, list_parts)
-  mat_hybrid_raw <- mat_hybrid_raw[, sort(colnames(mat_hybrid_raw)), drop = FALSE]
-  
-  mat_hybrid_z <- NULL
   if (mode == "complete") {
-    # Z-Score Standardization (Important: scales Track A and Track B to comparable variance)
-    mat_hybrid_z <- scale(mat_hybrid_raw)
-    attr(mat_hybrid_z, "scaled:center") <- NULL
-    attr(mat_hybrid_z, "scaled:scale") <- NULL
-    mat_hybrid_z <- as.matrix(mat_hybrid_z)
-    rownames(mat_hybrid_z) <- rn_safe
+    mat_final_z <- scale(mat_final_raw)
+    attr(mat_final_z, "scaled:center") <- NULL
+    attr(mat_final_z, "scaled:scale") <- NULL
+    mat_final_z <- as.matrix(mat_final_z)
+    rownames(mat_final_z) <- rn_safe
   } else {
-    mat_hybrid_z <- mat_hybrid_raw
+    mat_final_z <- mat_final_raw
   }
   
   return(list(
-    hybrid_data_raw = mat_hybrid_raw,
-    hybrid_data_z = mat_hybrid_z,
-    ilr_balances = ilr_results,
-    hybrid_markers = colnames(mat_hybrid_z)
+    hybrid_data_raw = mat_final_raw,
+    hybrid_data_z = mat_final_z,
+    hybrid_markers = colnames(mat_final_z)
   ))
 }

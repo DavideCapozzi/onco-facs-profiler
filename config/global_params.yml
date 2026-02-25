@@ -6,7 +6,10 @@
 output_root: "results"
 project_name: "longsurvivors"
 input_file: "/mnt/c/Users/Davide/Desktop/dottorato/projects/long survivors/DB_standardizzatov4_newPatients.xlsx"
-input_format: "percentage"  # Options: "percentage" (0-100) or "proportion" (0-1)
+
+transformation:
+  method: "logit" # Options: "logit" (for FACS percentages/proportions), "none" (for continuous unbounded data)
+input_format: "percentage"  # Options: "percentage" (0-100) or "proportion" (0-1). Applied only if method is "logit".
 
 # --- ANALYSIS TARGETS ---
 # Define here exactly which groups form the analysis.
