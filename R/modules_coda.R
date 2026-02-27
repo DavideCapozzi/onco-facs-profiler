@@ -235,6 +235,19 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
   mat_final_z <- NULL
   
   if (mode == "complete") {
+    # 1. Prevent NaN generation from scale() by filtering zero-variance columns post-imputation
+    col_vars_post <- apply(mat_final_raw, 2, var, na.rm = TRUE)
+    valid_cols_post <- !is.na(col_vars_post) & (col_vars_post > 1e-12)
+    
+    if (sum(!valid_cols_post) > 0) {
+      n_dropped <- sum(!valid_cols_post)
+      message(sprintf("   [Transform] Dropping %d columns with zero variance post-imputation to protect scaling.", n_dropped))
+      mat_final_raw <- mat_final_raw[, valid_cols_post, drop = FALSE]
+    }
+    
+    if (ncol(mat_final_raw) == 0) stop("[FATAL] All columns dropped due to zero variance post-imputation.")
+    
+    # 2. Safe scaling
     mat_final_z <- scale(mat_final_raw)
     attr(mat_final_z, "scaled:center") <- NULL
     attr(mat_final_z, "scaled:scale") <- NULL

@@ -8,7 +8,6 @@ suppressPackageStartupMessages({
   library(tidyverse)
   library(openxlsx)
   library(pcaMethods)
-  library(zCompositions) 
 })
 
 source("R/utils_io.R")     
@@ -253,7 +252,7 @@ save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"),
 # 4. Final Hybrid Transformation (Complete Mode)
 # ------------------------------------------------------------------------------
 # Now running on strictly filtered data.
-# Mode="complete" enables: CZM (zeros), BPCA (imputation), and CLR/ILR.
+# Mode="complete" enables: LOD zero handling, BPCA (imputation), and Logit transformation.
 
 na_rates <- rowMeans(is.na(mat_raw))
 impute_indices <- which(na_rates > 0)
