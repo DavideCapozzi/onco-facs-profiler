@@ -14,21 +14,28 @@
 #' @return A list containing results: $id, $permanova, $drivers, $network.
 run_comparative_workflow <- function(data_list, scenario, config, output_root) {
   
-  # 1. Setup Output Directory
+  # ============================================================================
+  # 1.0 INITIALIZATION
+  # ============================================================================
+  
+  # 1.1 Setup Output Directory
   out_dir <- file.path(output_root, scenario$id)
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
   
   message(sprintf("\n[Workflow] Starting Scenario: %s", scenario$id))
   
-  # 2. Data Preparation & Stratification Logic
-  # ----------------------------------------------------------------------------
+  # ============================================================================
+  # 2.0 DATA PREPARATION
+  # ============================================================================
+  
+  # 2.1 Extract Metadata and Matrix
   full_meta <- data_list$metadata
   full_mat  <- data_list$hybrid_data_z %>% 
     dplyr::select(dplyr::all_of(data_list$hybrid_markers)) %>% 
     as.matrix()
   rownames(full_mat) <- data_list$metadata$Patient_ID
   
-  # Apply Stratification Logic derived from Config
+  # 2.2 Apply Stratification Logic derived from Config
   if (!is.null(config$stratification$mode) && config$stratification$mode == "selection") {
     strat_col <- config$stratification$column
     if (strat_col %in% colnames(full_meta)) {
@@ -38,10 +45,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
     }
   }
   
-  # CRITICAL FIX: unlist() ensures we get a vector of strings, not a list
   target_groups <- unlist(c(scenario$case_groups, scenario$control_groups))
   
-  # Filter Metadata
+  # 2.3 Filter Metadata
   sub_meta <- full_meta %>% 
     dplyr::filter(Group %in% target_groups) %>% 
     dplyr::mutate(Analysis_Group = ifelse(Group %in% unlist(scenario$case_groups), 
@@ -50,22 +56,24 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
     dplyr::mutate(Analysis_Group = factor(Analysis_Group, 
                                           levels = c(scenario$control_label, scenario$case_label)))
   
-  # Filter Matrix
+  # 2.4 Filter Matrix
   sub_mat <- full_mat[sub_meta$Patient_ID, , drop = FALSE]
   
-  # Check if we have data after filtering
+  # 2.5 Validation: Check if samples exist
   if (nrow(sub_mat) == 0) {
     message("   [Stop] No samples found after filtering. Check Scenario groups.")
     return(NULL)
   }
   
-  # Log found samples
   counts <- table(sub_meta$Analysis_Group)
   message(sprintf("   [Info] Samples found: %s=%d vs %s=%d", 
                   names(counts)[1], counts[1], names(counts)[2], counts[2]))
   
-  # 3. Variance Sanity Check
-  # ----------------------------------------------------------------------------
+  # ============================================================================
+  # 3.0 QUALITY CONTROL
+  # ============================================================================
+  
+  # 3.1 Variance Sanity Check
   var_thresh <- if(!is.null(config$stats$min_variance)) config$stats$min_variance else 1e-6
   
   vars <- apply(sub_mat, 2, var, na.rm = TRUE)
@@ -77,8 +85,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
     sub_mat <- sub_mat[, keep_vars, drop = FALSE]
   }
   
-  # 4. Statistical Tests (PERMANOVA)
-  # ----------------------------------------------------------------------------
+  # ============================================================================
+  # 4.0 STATISTICAL TESTS
+  # ============================================================================
+  
+  # 4.1 PERMANOVA Inference
   message("   [Stats] Running PERMANOVA...")
   perm_res <- NULL
   tryCatch({
@@ -96,8 +107,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
     message(sprintf("      [Fail] PERMANOVA failed: %s", e$message))
   })
   
-  # 5. Multivariate Analysis (sPLS-DA)
-  # ----------------------------------------------------------------------------
+  # ============================================================================
+  # 5.0 MULTIVARIATE ANALYSIS
+  # ============================================================================
+  
+  # 5.1 sPLS-DA Modeling
   message("   [Stats] Running sPLS-DA...")
   spls_drivers <- NULL
   
@@ -132,7 +146,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         
         if (nrow(spls_drivers) > 0) {
           
-          # --- DYNAMIC COLOR MAPPING ---
+          # 5.2 Dynamic Color Mapping
           scen_palette <- c()
           scen_palette[scenario$control_label] <- config$colors$control
           scen_palette[scenario$case_label] <- if(length(config$colors$cases) > 0) config$colors$cases[[1]] else "firebrick"
@@ -146,7 +160,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             group_col = "Analysis_Group"
           )
           
-          # --- DYNAMIC RENAMING (Drivers) ---
+          # 5.3 Dynamic Renaming of Extractable Drivers
           contrast_lbl <- paste0(scenario$case_label, "_VS_", scenario$control_label)
           
           spls_drivers <- spls_drivers %>% 
@@ -165,8 +179,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
     })
   }
   
-  # 6. Network Inference (Robust Differential)
-  # ----------------------------------------------------------------------------
+  # ============================================================================
+  # 6.0 NETWORK INFERENCE & CYTOSCAPE EXPORT
+  # ============================================================================
+  
+  # 6.1 Infer Differential Networks
   message("   [Network] Inferring Differential Networks...")
   net_res <- NULL
   
@@ -183,7 +200,6 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
       n_boot_cfg <- if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100
       n_perm_cfg <- if(!is.null(config$stats$n_perm)) config$stats$n_perm else 1000
       
-      # Correct parameter reading
       pval_threshold_cfg <- if(!is.null(config$stats$pvalue_threshold)) config$stats$pvalue_threshold else 0.05
       edge_threshold_cfg <- if(!is.null(config$stats$network_edge_threshold)) config$stats$network_edge_threshold else 0.15
       
@@ -206,19 +222,17 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
       
       if (!is.null(net_res)) {
         
-        # --- 1. Save RDS (Raw Object) ---
+        # 6.2 Save Raw RDS Object
         rds_path <- file.path(out_dir, paste0(scenario$id, "_Differential_Network.rds"))
         saveRDS(net_res, rds_path)
         message(sprintf("      [Output] Network RDS saved: %s", basename(rds_path)))
         
-        # --- 2. Advanced Topology Integration ---
+        # 6.3 Topology Generation and Integration
         topo_xlsx_path <- file.path(out_dir, paste0(scenario$id, "_Topology_Metrics.xlsx"))
-        message(sprintf("      [Export] Generating Advanced Topology Report: %s", basename(topo_xlsx_path)))
-        
         wb_topo <- createWorkbook()
         has_topo_data <- FALSE
         
-        # A. Calculate Topologies
+        # 6.3.1 Topologies
         topo_ctrl <- NULL
         if (sum(net_res$stability$ctrl) > 0) {
           topo_ctrl <- calculate_node_topology(net_res$stability$ctrl)
@@ -241,7 +255,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           }
         }
         
-        # B. Node Rewiring (Jaccard)
+        # 6.3.2 Rewiring Architecture (Jaccard)
         if (sum(net_res$stability$ctrl) > 0 && sum(net_res$stability$case) > 0) {
           rewiring_df <- calculate_jaccard_rewiring(net_res$stability$ctrl, net_res$stability$case)
           if (!is.null(rewiring_df)) {
@@ -258,18 +272,16 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           }
         }
         
-        # C. Hub-Driver Integration
+        # 6.3.3 Hub-Driver Integration Visuals
         pdf_path <- file.path(out_dir, paste0(scenario$id, "_Hub_Driver_Report_4Page.pdf"))
         if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
           pdf(pdf_path, width = 11, height = 8)
           
-          # Helper to plot and save
           process_hub_driver <- function(topo, label, metric, suffix) {
             if (!is.null(topo)) {
               hd_res <- integrate_hub_drivers(spls_drivers, topo, topo_col = metric)
               if (!is.null(hd_res)) {
                 sh_name <- substr(paste0("Hub_Driver_", label, "_", substr(metric,1,3)), 1, 31)
-                # Only write to Excel if metric is Degree, avoiding redundant Betweenness sheets
                 if(metric == "Degree" && !sh_name %in% names(wb_topo)) {
                   addWorksheet(wb_topo, sh_name)
                   writeData(wb_topo, sh_name, hd_res)
@@ -286,11 +298,10 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           process_hub_driver(topo_case, scenario$case_label, "Betweenness", paste0("\nNetwork: ", scenario$case_label))
           
           dev.off()
-          message(sprintf("      [Viz] Saved 4-Page Hub-Driver Report: %s", basename(pdf_path)))
-          has_topo_data <- TRUE # If we wrote sheets
+          has_topo_data <- TRUE
         }
         
-        # D. Differential Edges
+        # 6.3.4 Edge Table Extractor
         if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
           addWorksheet(wb_topo, "Differential_Edges")
           writeData(wb_topo, "Differential_Edges", net_res$edges_table)
@@ -303,7 +314,6 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             addWorksheet(wb_topo, "Significant_Edges")
             writeData(wb_topo, "Significant_Edges", sig_edges_strict)
           }
-          
           has_topo_data <- TRUE
         }
         
@@ -311,7 +321,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           saveWorkbook(wb_topo, topo_xlsx_path, overwrite = TRUE)
         }
         
-        # --- 3. Visualization: Edge Density (Distribution) ---
+        # 6.4 Distribution Viz
         if (!is.null(net_res$networks)) {
           dist_pdf_path <- file.path(out_dir, paste0(scenario$id, "_Edge_Distribution.pdf"))
           pdf(dist_pdf_path, width = 8, height = 6)
@@ -319,13 +329,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           thresh_to_plot <- if(!is.null(net_res$applied_threshold)) net_res$applied_threshold else edge_threshold_cfg
           
           if(sum(abs(net_res$networks$ctrl) > 0) > 0) {
-            # Plot 1: Standard Partial Correlation Density
             print(viz_plot_edge_density(net_res$networks$ctrl, 
                                         adj_mat = net_res$stability$ctrl,
                                         threshold = thresh_to_plot, 
                                         group_label = scenario$control_label))
             
-            # Plot 2: Overlay Partial vs Raw Pearson Density
             if (!is.null(net_res$raw_cor$ctrl)) {
               print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$ctrl, 
                                                   cor_mat = net_res$raw_cor$ctrl,
@@ -336,13 +344,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           }
           
           if(sum(abs(net_res$networks$case) > 0) > 0) {
-            # Plot 1: Standard Partial Correlation Density
             print(viz_plot_edge_density(net_res$networks$case, 
                                         adj_mat = net_res$stability$case,
                                         threshold = thresh_to_plot, 
                                         group_label = scenario$case_label))
             
-            # Plot 2: Overlay Partial vs Raw Pearson Density
             if (!is.null(net_res$raw_cor$case)) {
               print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$case, 
                                                   cor_mat = net_res$raw_cor$case,
@@ -352,10 +358,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             }
           }
           dev.off()
-          message(sprintf("      [Viz] Saved Edge Distribution: %s", basename(dist_pdf_path)))
         }
         
-        # --- 4. Network Graph Visualization ---
+        # 6.5 Network Core Structure Viz
         if ((sum(net_res$stability$ctrl) > 0 || sum(net_res$stability$case) > 0)) {
           viz_path <- file.path(out_dir, paste0(scenario$id, "_Plot_Networks.pdf"))
           pdf(viz_path, width = 12, height = 6)
@@ -370,45 +375,106 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
             }
           })
           dev.off()
-          message("      [Viz] Network plots saved.")
         }
         
-        # --- 5. Cytoscape Export ---
-        message("      [Export] Generating Rich Cytoscape Tables (Filtered)...")
+        # 6.6 Explicit Cytoscape Formatter
+        message("      [Export] Generating Explicit Cytoscape Networks...")
         cyto_dir <- file.path(out_dir, "cytoscape_export")
         if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
         
-        # Identify significant differential edges to retain in Cytoscape
-        valid_edges <- c()
         if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
-          sig_edges_df <- net_res$edges_table %>%
-            dplyr::filter(Edge_Category != "Weak" & P_Value < 0.05)
           
-          if(nrow(sig_edges_df) > 0) {
-            valid_edges <- apply(sig_edges_df, 1, function(r) paste(sort(c(r["Node1"], r["Node2"])), collapse = "~"))
-          }
-        }
-        
-        if (sum(net_res$stability$ctrl) > 0) {
-          tbl_ctrl <- get_rich_network_table(net_res$stability$ctrl, net_res$networks$ctrl, group_label = scenario$control_label)
-          if (!is.null(tbl_ctrl)) {
-            tbl_ctrl <- tbl_ctrl %>%
-              dplyr::mutate(Edge_ID = apply(cbind(Source, Target), 1, function(x) paste(sort(x), collapse = "~"))) %>%
-              dplyr::filter(Edge_ID %in% valid_edges) %>%
-              dplyr::select(-Edge_ID)
+          base_edges <- net_res$edges_table %>%
+            dplyr::filter(Edge_Category != "Weak")
+          
+          if (nrow(base_edges) > 0) {
             
-            if(nrow(tbl_ctrl) > 0) write.csv(tbl_ctrl, file.path(cyto_dir, paste0(scenario$control_label, "_RichTable.csv")), row.names = FALSE)
-          }
-        }
-        if (sum(net_res$stability$case) > 0) {
-          tbl_case <- get_rich_network_table(net_res$stability$case, net_res$networks$case, group_label = scenario$case_label)
-          if (!is.null(tbl_case)) {
-            tbl_case <- tbl_case %>%
-              dplyr::mutate(Edge_ID = apply(cbind(Source, Target), 1, function(x) paste(sort(x), collapse = "~"))) %>%
-              dplyr::filter(Edge_ID %in% valid_edges) %>%
-              dplyr::select(-Edge_ID)
+            col_pcor_ctrl <- paste0("Pcor_", scenario$control_label)
+            col_pcor_case <- paste0("Pcor_", scenario$case_label)
+            col_stab_ctrl <- paste0("Is_Stable_", scenario$control_label)
+            col_stab_case <- paste0("Is_Stable_", scenario$case_label)
             
-            if(nrow(tbl_case) > 0) write.csv(tbl_case, file.path(cyto_dir, paste0(scenario$case_label, "_RichTable.csv")), row.names = FALSE)
+            # 6.6.1 Control Target Matrix
+            ctrl_net <- base_edges %>%
+              dplyr::select(
+                Source = Node1,
+                Target = Node2,
+                Pcor = .data[[col_pcor_ctrl]],
+                Is_Stable = .data[[col_stab_ctrl]],
+                Edge_Category,
+                Significant,
+                P_Value
+              ) %>%
+              dplyr::mutate(Interaction = Edge_Category)
+            
+            readr::write_csv(ctrl_net, file.path(cyto_dir, paste0(scenario$id, "_", scenario$control_label, "_network.csv")))
+            
+            # 6.6.2 Case Target Matrix
+            case_net <- base_edges %>%
+              dplyr::select(
+                Source = Node1,
+                Target = Node2,
+                Pcor = .data[[col_pcor_case]],
+                Is_Stable = .data[[col_stab_case]],
+                Edge_Category,
+                Significant,
+                P_Value
+              ) %>%
+              dplyr::mutate(Interaction = Edge_Category)
+            
+            readr::write_csv(case_net, file.path(cyto_dir, paste0(scenario$id, "_", scenario$case_label, "_network.csv")))
+            
+            # 6.6.3 Differential Matrix
+            diff_net <- base_edges %>%
+              dplyr::select(
+                Source = Node1,
+                Target = Node2,
+                Weight = Diff_Score,
+                Pcor_Control = .data[[col_pcor_ctrl]],
+                Pcor_Case = .data[[col_pcor_case]],
+                Edge_Category,
+                Significant,
+                P_Value
+              ) %>%
+              dplyr::mutate(Interaction = Edge_Category)
+            
+            readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))
+            
+            # 6.6.4 Global Node Attributes
+            all_nodes <- unique(c(base_edges$Node1, base_edges$Node2))
+            cyto_nodes <- data.frame(Node = all_nodes, stringsAsFactors = FALSE)
+            
+            if (!is.null(topo_ctrl)) {
+              t_ctrl <- topo_ctrl %>% 
+                dplyr::select(Node, Degree, Betweenness) %>%
+                dplyr::rename(!!paste0("Degree_", scenario$control_label) := Degree,
+                              !!paste0("Betweenness_", scenario$control_label) := Betweenness)
+              cyto_nodes <- dplyr::left_join(cyto_nodes, t_ctrl, by = "Node")
+            }
+            
+            if (!is.null(topo_case)) {
+              t_case <- topo_case %>% 
+                dplyr::select(Node, Degree, Betweenness) %>%
+                dplyr::rename(!!paste0("Degree_", scenario$case_label) := Degree,
+                              !!paste0("Betweenness_", scenario$case_label) := Betweenness)
+              cyto_nodes <- dplyr::left_join(cyto_nodes, t_case, by = "Node")
+            }
+            
+            if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
+              drv_summ <- spls_drivers %>%
+                dplyr::group_by(Marker) %>%
+                dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
+                dplyr::ungroup() %>%
+                dplyr::select(Marker, Importance, Direction) %>%
+                dplyr::rename(PLSDA_Importance = Importance, PLSDA_Direction = Direction)
+              
+              cyto_nodes <- dplyr::left_join(cyto_nodes, drv_summ, by = c("Node" = "Marker"))
+            }
+            
+            numeric_cols <- names(cyto_nodes)[sapply(cyto_nodes, is.numeric)]
+            cyto_nodes[numeric_cols] <- lapply(cyto_nodes[numeric_cols], function(x) replace(x, is.na(x), 0))
+            
+            readr::write_csv(cyto_nodes, file.path(cyto_dir, paste0(scenario$id, "_node_attributes.csv")))
           }
         }
       }
