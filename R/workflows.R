@@ -206,6 +206,9 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
       seed_cfg <- if(!is.null(config$stats$seed)) config$stats$seed else 123
       n_cores_cfg <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1
       
+      # Dynamic threshold parameters from config (fallback to 'absolute' if missing)
+      thresh_type_cfg <- if(!is.null(config$stats$network_threshold_type)) config$stats$network_threshold_type else "percentile"
+      
       net_res <- run_differential_network(
         mat_ctrl = mat_ctrl, 
         mat_case = mat_case, 
@@ -216,8 +219,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         pvalue_thresh = pval_threshold_cfg,
         label_ctrl = scenario$control_label, 
         label_case = scenario$case_label,
-        threshold_type = "percentile", 
-        threshold_value = 0.85
+        threshold_type = thresh_type_cfg, 
+        threshold_value = edge_threshold_cfg
       )
       
       if (!is.null(net_res)) {

@@ -195,14 +195,17 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   obs_diff <- abs(obs_ctrl - obs_case)
   
   # --- DYNAMIC THRESHOLD CALCULATION ---
-    if (threshold_type == "percentile") {
-      all_pcor_vals <- c(obs_ctrl[upper.tri(obs_ctrl)], obs_case[upper.tri(obs_case)])
-      actual_thresh <- quantile(abs(all_pcor_vals), probs = threshold_value, na.rm = TRUE)
-      message(sprintf("      [DiffNet] Percentile threshold (%.2f) calculated as |rho| >= %.4f", threshold_value, actual_thresh))
-    } else {
-      actual_thresh <- threshold_value
-      message(sprintf("      [DiffNet] Absolute threshold used: |rho| >= %.4f", actual_thresh))
-    }
+  if (threshold_value == 0) {
+    actual_thresh <- 0
+    message("      [DiffNet] Threshold set to 0. Keeping all edges for topological filtering.")
+  } else if (threshold_type == "percentile") {
+    all_pcor_vals <- c(obs_ctrl[upper.tri(obs_ctrl)], obs_case[upper.tri(obs_case)])
+    actual_thresh <- quantile(abs(all_pcor_vals), probs = threshold_value, na.rm = TRUE)
+    message(sprintf("      [DiffNet] Percentile threshold (%.2f) calculated as |rho| >= %.4f", threshold_value, actual_thresh))
+  } else {
+    actual_thresh <- threshold_value
+    message(sprintf("      [DiffNet] Absolute threshold used: |rho| >= %.4f", actual_thresh))
+  }
   
   # --- STEP 3: PERMUTATION TEST ---
   message("      [DiffNet] 2/3 Running Permutation Test...")
@@ -249,37 +252,39 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
       test_case <- tryCatch(suppressWarnings(cor.test(mat_case[,i], mat_case[,j], method = "pearson")), error = function(e) list(p.value = NA))
       
       # --- BIOLOGICAL CLASSIFICATION LOGIC ---
-      # 1. Magnitude Check (At least one must be biologically relevant)
-      is_relevant <- (abs(w_ctrl) >= actual_thresh) | (abs(w_case) >= actual_thresh)
+      # Edge is valid in a condition ONLY IF it is BOTH topologically stable AND passes the magnitude threshold
+      is_valid_ctrl <- (agg_ctrl$adj[i,j] == 1) & (abs(w_ctrl) >= actual_thresh)
+      is_valid_case <- (agg_case$adj[i,j] == 1) & (abs(w_case) >= actual_thresh)
+      
+      # Edge is retained if valid in at least one condition (Logical OR)
+      is_relevant <- is_valid_ctrl | is_valid_case
       
       category <- "Weak"
       if (is_relevant) {
-        # Check Signs (Note: Small floating point noise around 0 is handled by magnitude check above)
-        same_sign <- (sign(w_ctrl) == sign(w_case))
-        
-        if (!same_sign) {
-          # Signs oppose: INVERTED
-          category <- "Inverted"
-        } else {
-          # Signs agree: Check if conserved or specific
-          # Conserved if BOTH are above threshold
-          if (abs(w_ctrl) >= actual_thresh && abs(w_case) >= actual_thresh) {
+        if (is_valid_ctrl && is_valid_case) {
+          # Edge is valid in both conditions: check directionality
+          same_sign <- (sign(w_ctrl) == sign(w_case))
+          if (same_sign) {
             category <- "Conserved"
           } else {
-            category <- "Specific" # One is strong, one is weak (but same sign/zero)
+            category <- "Inverted"
           }
+        } else {
+          # Edge is valid in only one condition
+          category <- "Specific"
         }
       }
       
+      # Reordered columns according to specification
       results_list[[k]] <- data.frame(
         Node1 = nodes[i],
         Node2 = nodes[j],
-        Weight_Ctrl = w_ctrl,    
-        Weight_Case = w_case,    
-        Cor_Ctrl = raw_cor_ctrl[i,j],   
-        Cor_Case = raw_cor_case[i,j],   
         Pval_Cor_Ctrl = test_ctrl$p.value,
+        Cor_Ctrl = raw_cor_ctrl[i,j],   
+        Weight_Ctrl = w_ctrl,    
         Pval_Cor_Case = test_case$p.value,
+        Cor_Case = raw_cor_case[i,j],   
+        Weight_Case = w_case,    
         Is_Stable_Ctrl = agg_ctrl$adj[i,j] == 1,
         Is_Stable_Case = agg_case$adj[i,j] == 1,
         Diff_Score = obs_val,

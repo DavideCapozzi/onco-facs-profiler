@@ -1071,11 +1071,15 @@ viz_plot_edge_density <- function(pcor_mat, adj_mat = NULL, threshold = 0.15, gr
   
   p <- ggplot(df_plot, aes(x = Value)) +
     # Density Curve
-    geom_density(fill = "steelblue", alpha = 0.3) +
-    # Threshold Lines
-    geom_vline(xintercept = c(-threshold, threshold), 
-               linetype = "dashed", color = "red", size = 0.8) +
-    
+    geom_density(fill = "steelblue", alpha = 0.3)
+  
+  # Conditionally add Threshold Lines only if threshold is greater than 0
+  if (threshold > 0) {
+    p <- p + geom_vline(xintercept = c(-threshold, threshold), 
+                        linetype = "dashed", color = "red", size = 0.8)
+  }
+  
+  p <- p +
     # Annotation
     labs(
       title = paste("Edge Weight Distribution:", group_label),
@@ -1128,8 +1132,15 @@ viz_plot_edge_density_overlay <- function(pcor_mat, cor_mat, adj_mat = NULL, thr
   }
   
   p <- ggplot(df_plot, aes(x = Value, fill = Metric, color = Metric)) +
-    geom_density(alpha = 0.4, size = 0.8) +
-    geom_vline(xintercept = c(-threshold, threshold), linetype = "dashed", color = "red", size = 0.8) +
+    geom_density(alpha = 0.4, size = 0.8)
+  
+  # Conditionally add Threshold Lines
+  if (threshold > 0) {
+    p <- p + geom_vline(xintercept = c(-threshold, threshold), 
+                        linetype = "dashed", color = "red", size = 0.8)
+  }
+  
+  p <- p + 
     scale_fill_manual(values = c("Pearson (Raw)" = "gray60", "Partial (Shrinkage)" = "steelblue")) +
     scale_color_manual(values = c("Pearson (Raw)" = "gray40", "Partial (Shrinkage)" = "#1F4E79")) +
     labs(
