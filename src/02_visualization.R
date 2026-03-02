@@ -75,8 +75,6 @@ if (any(is.na(colors_viz))) {
 
 hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
 
-hl_pattern <- if(!is.null(config$viz$highlight_pattern)) config$viz$highlight_pattern else ""
-
 out_dir <- file.path(config$output_root, "02_visualization")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 

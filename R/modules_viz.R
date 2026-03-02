@@ -182,11 +182,11 @@ plot_raw_distribution_merged <- function(data_df, marker_name, colors,
                 width = 0.2, size = 2.5, shape = 21, alpha = 0.8) +
     
     # Layer 3: Median (Solid Black Line)
-    stat_summary(fun = median, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+    stat_summary(fun = median, geom = "errorbar", aes(ymax = after_stat(y), ymin = after_stat(y)),
                  width = 0.5, size = 0.8, color = "black") +
     
     # Layer 4: Mean (Dashed Red Line)
-    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = after_stat(y), ymin = after_stat(y)),
                  width = 0.5, size = 0.8, color = "darkred", linetype = "dashed") +
     
     # Colors
