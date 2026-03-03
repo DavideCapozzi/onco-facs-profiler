@@ -70,19 +70,28 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
                   names(counts)[1], counts[1], names(counts)[2], counts[2]))
   
   # ============================================================================
-  # 3.0 QUALITY CONTROL
+  # 3.0 DATA SANITY CHECKS & UNIVERSAL SPACE PRESERVATION
   # ============================================================================
   
-  # 3.1 Variance Sanity Check
+  # 3.1 Variance Sanity Check (Micro-Jitter Approach)
+  # Instead of dropping low-variance markers and breaking the Universal Feature Space,
+  # we inject a microscopic noise to prevent singularity errors in correlation matrices.
   var_thresh <- if(!is.null(config$stats$min_variance)) config$stats$min_variance else 1e-6
   
   vars <- apply(sub_mat, 2, var, na.rm = TRUE)
-  keep_vars <- vars > var_thresh & !is.na(vars)
+  low_vars <- vars < var_thresh | is.na(vars)
   
-  if (sum(!keep_vars) > 0) {
-    dropped <- names(vars)[!keep_vars]
-    message(sprintf("   [Prep] Dropping %d features with variance < %s.", length(dropped), as.character(var_thresh)))
-    sub_mat <- sub_mat[, keep_vars, drop = FALSE]
+  if (sum(low_vars) > 0) {
+    dropped_names <- names(vars)[low_vars]
+    message(sprintf("   [Prep] Warning: %d features have variance < %s.", sum(low_vars), as.character(var_thresh)))
+    message("   [Prep] Injecting micro-jitter to preserve Universal Feature Space and prevent mathematical singularities.")
+    
+    # Inject microscopic noise (sd = 1e-8) to prevent division by zero in cor/pcor
+    # This ensures the correlation calculation completes and returns ~0 for these flat features.
+    set.seed(if(!is.null(config$stats$seed)) config$stats$seed else 123)
+    for (col in dropped_names) {
+      sub_mat[, col] <- sub_mat[, col] + rnorm(nrow(sub_mat), mean = 0, sd = 1e-8)
+    }
   }
   
   # ============================================================================
@@ -237,8 +246,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         
         # 6.3.1 Topologies
         topo_ctrl <- NULL
-        if (sum(net_res$stability$ctrl) > 0) {
-          topo_ctrl <- calculate_node_topology(net_res$stability$ctrl)
+        if (sum(net_res$adj_final$ctrl) > 0) {
+          topo_ctrl <- calculate_node_topology(net_res$adj_final$ctrl)
           if (!is.null(topo_ctrl)) {
             sh_name <- substr(paste0("Topology_", scenario$control_label), 1, 31)
             addWorksheet(wb_topo, sh_name)
@@ -248,8 +257,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         }
         
         topo_case <- NULL
-        if (sum(net_res$stability$case) > 0) {
-          topo_case <- calculate_node_topology(net_res$stability$case)
+        if (sum(net_res$adj_final$case) > 0) {
+          topo_case <- calculate_node_topology(net_res$adj_final$case)
           if (!is.null(topo_case)) {
             sh_name <- substr(paste0("Topology_", scenario$case_label), 1, 31)
             addWorksheet(wb_topo, sh_name)
@@ -259,8 +268,8 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         }
         
         # 6.3.2 Rewiring Architecture (Jaccard)
-        if (sum(net_res$stability$ctrl) > 0 && sum(net_res$stability$case) > 0) {
-          rewiring_df <- calculate_jaccard_rewiring(net_res$stability$ctrl, net_res$stability$case)
+        if (sum(net_res$adj_final$ctrl) > 0 && sum(net_res$adj_final$case) > 0) {
+          rewiring_df <- calculate_jaccard_rewiring(net_res$adj_final$ctrl, net_res$adj_final$case)
           if (!is.null(rewiring_df)) {
             col_ctrl <- paste0("Degree_", scenario$control_label)
             col_case <- paste0("Degree_", scenario$case_label)
@@ -310,7 +319,7 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           writeData(wb_topo, "Differential_Edges", net_res$edges_table)
           
           sig_edges_strict <- net_res$edges_table %>%
-            dplyr::filter(Edge_Category != "Weak" & P_Value < 0.05) %>%
+            dplyr::filter(Edge_Category != "Weak" & Significant == TRUE) %>%
             dplyr::arrange(P_Value)
           
           if (nrow(sig_edges_strict) > 0) {
@@ -333,14 +342,14 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           
           if(sum(abs(net_res$networks$ctrl) > 0) > 0) {
             print(viz_plot_edge_density(net_res$networks$ctrl, 
-                                        adj_mat = net_res$stability$ctrl,
+                                        adj_mat = net_res$adj_final$ctrl,
                                         threshold = thresh_to_plot, 
                                         group_label = scenario$control_label))
             
             if (!is.null(net_res$raw_cor$ctrl)) {
               print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$ctrl, 
                                                   cor_mat = net_res$raw_cor$ctrl,
-                                                  adj_mat = net_res$stability$ctrl,
+                                                  adj_mat = net_res$adj_final$ctrl,
                                                   threshold = thresh_to_plot, 
                                                   group_label = scenario$control_label))
             }
@@ -348,14 +357,14 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
           
           if(sum(abs(net_res$networks$case) > 0) > 0) {
             print(viz_plot_edge_density(net_res$networks$case, 
-                                        adj_mat = net_res$stability$case,
+                                        adj_mat = net_res$adj_final$case,
                                         threshold = thresh_to_plot, 
                                         group_label = scenario$case_label))
             
             if (!is.null(net_res$raw_cor$case)) {
               print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$case, 
                                                   cor_mat = net_res$raw_cor$case,
-                                                  adj_mat = net_res$stability$case,
+                                                  adj_mat = net_res$adj_final$case,
                                                   threshold = thresh_to_plot, 
                                                   group_label = scenario$case_label))
             }
@@ -364,16 +373,16 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         }
         
         # 6.5 Network Core Structure Viz
-        if ((sum(net_res$stability$ctrl) > 0 || sum(net_res$stability$case) > 0)) {
+        if ((sum(net_res$adj_final$ctrl) > 0 || sum(net_res$adj_final$case) > 0)) {
           viz_path <- file.path(out_dir, paste0(scenario$id, "_Plot_Networks.pdf"))
           pdf(viz_path, width = 12, height = 6)
           try({
-            if(sum(net_res$stability$ctrl) > 0) {
-              print(plot_network_structure(net_res$stability$ctrl, net_res$networks$ctrl, 
+            if(sum(net_res$adj_final$ctrl) > 0) {
+              print(plot_network_structure(net_res$adj_final$ctrl, net_res$networks$ctrl, 
                                            title = paste("Control:", scenario$control_label), min_cor = 0))
             }
-            if(sum(net_res$stability$case) > 0) {
-              print(plot_network_structure(net_res$stability$case, net_res$networks$case, 
+            if(sum(net_res$adj_final$case) > 0) {
+              print(plot_network_structure(net_res$adj_final$case, net_res$networks$case, 
                                            title = paste("Case:", scenario$case_label), min_cor = 0))
             }
           })
@@ -387,18 +396,25 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
         
         if (!is.null(net_res$edges_table) && nrow(net_res$edges_table) > 0) {
           
-          base_edges <- net_res$edges_table %>%
-            dplyr::filter(Edge_Category != "Weak")
+          # Define column names dynamically based on labels
+          col_pcor_ctrl <- paste0("Pcor_", scenario$control_label)
+          col_pcor_case <- paste0("Pcor_", scenario$case_label)
+          col_valid_ctrl <- paste0("Is_Valid_", scenario$control_label)
+          col_valid_case <- paste0("Is_Valid_", scenario$case_label)
           
-          if (nrow(base_edges) > 0) {
-            
-            col_pcor_ctrl <- paste0("Pcor_", scenario$control_label)
-            col_pcor_case <- paste0("Pcor_", scenario$case_label)
-            col_stab_ctrl <- paste0("Is_Stable_", scenario$control_label)
-            col_stab_case <- paste0("Is_Stable_", scenario$case_label)
-            
-            # 6.6.1 Control Target Matrix
-            ctrl_net <- base_edges %>%
+          # Extract specific networks respecting biological constraints (Stability + Magnitude)
+          ctrl_edges <- net_res$edges_table %>%
+            dplyr::filter(.data[[col_valid_ctrl]] == TRUE & Edge_Category != "Weak")
+          
+          case_edges <- net_res$edges_table %>%
+            dplyr::filter(.data[[col_valid_case]] == TRUE & Edge_Category != "Weak")
+          
+          diff_edges <- net_res$edges_table %>%
+            dplyr::filter(Significant == TRUE & Edge_Category != "Weak")
+          
+          # 6.6.1 Control Target Matrix
+          if (nrow(ctrl_edges) > 0) {
+            ctrl_net <- ctrl_edges %>%
               dplyr::select(
                 Source = Node1,
                 Target = Node2,
@@ -411,9 +427,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
               dplyr::mutate(Interaction = Edge_Category)
             
             readr::write_csv(ctrl_net, file.path(cyto_dir, paste0(scenario$id, "_", scenario$control_label, "_network.csv")))
-            
-            # 6.6.2 Case Target Matrix
-            case_net <- base_edges %>%
+          }
+          
+          # 6.6.2 Case Target Matrix
+          if (nrow(case_edges) > 0) {
+            case_net <- case_edges %>%
               dplyr::select(
                 Source = Node1,
                 Target = Node2,
@@ -426,9 +444,11 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
               dplyr::mutate(Interaction = Edge_Category)
             
             readr::write_csv(case_net, file.path(cyto_dir, paste0(scenario$id, "_", scenario$case_label, "_network.csv")))
-            
-            # 6.6.3 Differential Matrix
-            diff_net <- base_edges %>%
+          }
+          
+          # 6.6.3 Differential Matrix
+          if (nrow(diff_edges) > 0) {
+            diff_net <- diff_edges %>%
               dplyr::select(
                 Source = Node1,
                 Target = Node2,
@@ -442,43 +462,43 @@ run_comparative_workflow <- function(data_list, scenario, config, output_root) {
               dplyr::mutate(Interaction = Edge_Category)
             
             readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))
-            
-            # 6.6.4 Global Node Attributes
-            all_nodes <- unique(c(base_edges$Node1, base_edges$Node2))
-            cyto_nodes <- data.frame(Node = all_nodes, stringsAsFactors = FALSE)
-            
-            if (!is.null(topo_ctrl)) {
-              t_ctrl <- topo_ctrl %>% 
-                dplyr::select(Node, Degree, Betweenness) %>%
-                dplyr::rename(!!paste0("Degree_", scenario$control_label) := Degree,
-                              !!paste0("Betweenness_", scenario$control_label) := Betweenness)
-              cyto_nodes <- dplyr::left_join(cyto_nodes, t_ctrl, by = "Node")
-            }
-            
-            if (!is.null(topo_case)) {
-              t_case <- topo_case %>% 
-                dplyr::select(Node, Degree, Betweenness) %>%
-                dplyr::rename(!!paste0("Degree_", scenario$case_label) := Degree,
-                              !!paste0("Betweenness_", scenario$case_label) := Betweenness)
-              cyto_nodes <- dplyr::left_join(cyto_nodes, t_case, by = "Node")
-            }
-            
-            if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
-              drv_summ <- spls_drivers %>%
-                dplyr::group_by(Marker) %>%
-                dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
-                dplyr::ungroup() %>%
-                dplyr::select(Marker, Importance, Direction) %>%
-                dplyr::rename(PLSDA_Importance = Importance, PLSDA_Direction = Direction)
-              
-              cyto_nodes <- dplyr::left_join(cyto_nodes, drv_summ, by = c("Node" = "Marker"))
-            }
-            
-            numeric_cols <- names(cyto_nodes)[sapply(cyto_nodes, is.numeric)]
-            cyto_nodes[numeric_cols] <- lapply(cyto_nodes[numeric_cols], function(x) replace(x, is.na(x), 0))
-            
-            readr::write_csv(cyto_nodes, file.path(cyto_dir, paste0(scenario$id, "_node_attributes.csv")))
           }
+          
+          # 6.6.4 Global Node Attributes
+          all_nodes <- unique(c(net_res$edges_table$Node1, net_res$edges_table$Node2))
+          cyto_nodes <- data.frame(Node = all_nodes, stringsAsFactors = FALSE)
+          
+          if (!is.null(topo_ctrl)) {
+            t_ctrl <- topo_ctrl %>% 
+              dplyr::select(Node, Degree, Betweenness) %>%
+              dplyr::rename(!!paste0("Degree_", scenario$control_label) := Degree,
+                            !!paste0("Betweenness_", scenario$control_label) := Betweenness)
+            cyto_nodes <- dplyr::left_join(cyto_nodes, t_ctrl, by = "Node")
+          }
+          
+          if (!is.null(topo_case)) {
+            t_case <- topo_case %>% 
+              dplyr::select(Node, Degree, Betweenness) %>%
+              dplyr::rename(!!paste0("Degree_", scenario$case_label) := Degree,
+                            !!paste0("Betweenness_", scenario$case_label) := Betweenness)
+            cyto_nodes <- dplyr::left_join(cyto_nodes, t_case, by = "Node")
+          }
+          
+          if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
+            drv_summ <- spls_drivers %>%
+              dplyr::group_by(Marker) %>%
+              dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
+              dplyr::ungroup() %>%
+              dplyr::select(Marker, Importance, Direction) %>%
+              dplyr::rename(PLSDA_Importance = Importance, PLSDA_Direction = Direction)
+            
+            cyto_nodes <- dplyr::left_join(cyto_nodes, drv_summ, by = c("Node" = "Marker"))
+          }
+          
+          numeric_cols <- names(cyto_nodes)[sapply(cyto_nodes, is.numeric)]
+          cyto_nodes[numeric_cols] <- lapply(cyto_nodes[numeric_cols], function(x) replace(x, is.na(x), 0))
+          
+          readr::write_csv(cyto_nodes, file.path(cyto_dir, paste0(scenario$id, "_node_attributes.csv")))
         }
       }
     }

@@ -165,7 +165,7 @@ tryCatch({
             writeData(wb_master, sheet_name, res$network$edges_table)
             
             sig_edges_master <- res$network$edges_table %>%
-              dplyr::filter(Edge_Category != "Weak" & P_Value < 0.05) %>%
+              dplyr::filter(Edge_Category != "Weak" & Significant == TRUE) %>%
               dplyr::arrange(P_Value)
             
             if (nrow(sig_edges_master) > 0) {
