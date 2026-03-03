@@ -105,36 +105,26 @@ aggregate_boot_results <- function(boot_list, alpha = 0.05) {
   return(list(adj = adj_mat, weights = mean_mat, stability = stab_mat, n_boot_valid = n_boots))
 }
 
-#' @title Run Robust Differential Network Analysis (Bootstrap + Permutation)
+#' @title Compute Universal Baseline Network
 #' @description 
-#' Combines Bootstrap (for edge stability) and Permutation (for differential significance).
-#' Implements Universal Baseline paradigm: Topology is strictly defined by Stability AND Magnitude.
+#' Calculates Pcor, Bootstrap Stability, and generates the finalized adjacency matrix 
+#' for a single macro-group. This operation is executed only once per group.
 #' 
-#' @param mat_ctrl Reference matrix.
-#' @param mat_case Test matrix.
-#' @param n_boot Number of bootstrap iterations for stability (default 100).
-#' @param n_perm Number of permutations for significance (default 1000).
+#' @param mat Numeric matrix (Samples x Features).
+#' @param label String label for the group.
+#' @param n_boot Number of bootstrap iterations.
 #' @param seed Random seed.
 #' @param n_cores Number of cores.
-#' @param pvalue_thresh P-value threshold for significance (default 0.05).
-#' @param stability_thresh Frequency threshold to keep an edge (e.g., 0.8 = 80%).
-#' @param label_ctrl Label for control group.
-#' @param label_case Label for case group.
-#' @param threshold_type percentile or absolute.
-#' @param threshold_value Threshold for pcor values.
-#' @return List with edge table and network objects.
-run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 1000, 
-                                     seed = 123, n_cores = 1, pvalue_thresh = 0.05,
-                                     label_ctrl = "Ctrl", label_case = "Case",
-                                     threshold_type = "percentile", 
-                                     threshold_value = 0.85) {
-  
+#' @param threshold_type "percentile" or "absolute".
+#' @param threshold_value Threshold magnitude for valid edges.
+#' @return List containing stabilized topological networks and matrices.
+compute_universal_baseline <- function(mat, label = "Group", n_boot = 100, seed = 123, n_cores = 1, threshold_type = "percentile", threshold_value = 0.85) {
   requireNamespace("parallel", quietly = TRUE)
   requireNamespace("doParallel", quietly = TRUE)
   requireNamespace("foreach", quietly = TRUE)
   requireNamespace("corpcor", quietly = TRUE)
   
-  message(sprintf("      [DiffNet] Start: Boot=%d, Perm=%d, Cores=%d", n_boot, n_perm, n_cores))
+  message(sprintf("   [%s Baseline] Start: Boot=%d, Cores=%d", label, n_boot, n_cores))
   
   cl <- parallel::makeCluster(n_cores)
   on.exit({
@@ -146,86 +136,109 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   parallel::clusterExport(cl, varlist = c("infer_network_pcor", "boot_worker_pcor"), envir = environment())
   parallel::clusterSetRNGStream(cl, seed)
   
-  # --- STEP 1: BOOTSTRAP (Stability) ---
-  message("      [DiffNet] 1/3 Running Bootstrap Stability...")
-  
-  run_boot_internal <- function(mat, n_b) {
-    n_samp <- nrow(mat)
-    res_list <- foreach::foreach(i = 1:n_b, .packages = "corpcor") %dopar% {
-      boot_worker_pcor(mat, n_samp, lambda_val = NULL)
-    }
-    Filter(Negate(is.null), res_list)
+  # 1. BOOTSTRAP STABILITY
+  n_samp <- nrow(mat)
+  res_list <- foreach::foreach(i = 1:n_boot, .packages = "corpcor") %dopar% {
+    boot_worker_pcor(mat, n_samp, lambda_val = NULL)
   }
   
-  boots_ctrl <- run_boot_internal(mat_ctrl, n_boot)
-  boots_case <- run_boot_internal(mat_case, n_boot)
+  boots <- Filter(Negate(is.null), res_list)
+  agg <- aggregate_boot_results(boots, alpha = 0.05)
+  check_boot_yield(agg, n_boot, label)
   
-  agg_ctrl <- aggregate_boot_results(boots_ctrl, alpha = 0.05)
-  agg_case <- aggregate_boot_results(boots_case, alpha = 0.05)
-  
-  check_boot_yield(agg_ctrl, n_boot, "Ctrl")
-  check_boot_yield(agg_case, n_boot, "Case")
-  
-  # --- STEP 2: UNIVERSAL BASELINE & THRESHOLDS ---
-  obs_ctrl <- infer_network_pcor(mat_ctrl, fixed_lambda = NULL)
-  obs_case <- infer_network_pcor(mat_case, fixed_lambda = NULL)
-  
-  raw_cor_ctrl <- cor(mat_ctrl, use = "pairwise.complete.obs")
-  raw_cor_case <- cor(mat_case, use = "pairwise.complete.obs")
-  
-  obs_diff <- abs(obs_ctrl - obs_case)
+  # 2. PCOR & MAGNITUDE THRESHOLDING
+  obs_pcor <- infer_network_pcor(mat, fixed_lambda = NULL)
+  raw_cor <- cor(mat, use = "pairwise.complete.obs")
   
   if (threshold_value == 0) {
     actual_thresh <- 0
-    message("      [DiffNet] Threshold set to 0. Keeping all edges for topological filtering.")
+    message(sprintf("   [%s Baseline] Threshold set to 0.", label))
   } else if (threshold_type == "percentile") {
-    all_pcor_vals <- c(obs_ctrl[upper.tri(obs_ctrl)], obs_case[upper.tri(obs_case)])
-    actual_thresh <- quantile(abs(all_pcor_vals), probs = threshold_value, na.rm = TRUE)
-    message(sprintf("      [DiffNet] Percentile threshold (%.2f) calculated as |rho| >= %.4f", threshold_value, actual_thresh))
+    actual_thresh <- quantile(abs(obs_pcor[upper.tri(obs_pcor)]), probs = threshold_value, na.rm = TRUE)
+    message(sprintf("   [%s Baseline] Percentile threshold (%.2f) -> |rho| >= %.4f", label, threshold_value, actual_thresh))
   } else {
     actual_thresh <- threshold_value
-    message(sprintf("      [DiffNet] Absolute threshold used: |rho| >= %.4f", actual_thresh))
+    message(sprintf("   [%s Baseline] Absolute threshold -> |rho| >= %.4f", label, actual_thresh))
   }
   
-  # --- APPLY TOPOLOGICAL PARADIGM: STABILITY + MAGNITUDE ---
-  # Nodes exist in the baseline ONLY IF they pass both Bootstrap Stability and Pcor Magnitude
-  adj_ctrl_final <- (agg_ctrl$adj == 1) & (abs(obs_ctrl) >= actual_thresh)
-  adj_case_final <- (agg_case$adj == 1) & (abs(obs_case) >= actual_thresh)
+  # 3. UNIVERSAL TOPOLOGICAL DEFINITION
+  adj_final <- (agg$adj == 1) & (abs(obs_pcor) >= actual_thresh)
+  n_edges <- sum(adj_final[upper.tri(adj_final)])
+  message(sprintf("   [%s Baseline] Valid edges (Stable + Magnitude): %d", label, n_edges))
   
-  # Differential mask: evaluate edges valid in at least one baseline
-  stable_mask <- adj_ctrl_final | adj_case_final
+  return(list(
+    label = label,
+    mat = mat, 
+    pcor = obs_pcor,
+    raw_cor = raw_cor,
+    stability = agg$adj,
+    adj_final = adj_final,
+    applied_threshold = actual_thresh
+  ))
+}
+
+#' @title Compute Differential Overlay
+#' @description 
+#' Performs Permutation Testing leveraging pre-calculated Universal Baselines.
+#' Bypasses redundant bootstrapping entirely.
+#' 
+#' @param base_ctrl Pre-calculated baseline object for the control group.
+#' @param base_case Pre-calculated baseline object for the case group.
+#' @param n_perm Number of permutations.
+#' @param seed Random seed.
+#' @param n_cores Number of cores.
+#' @param pvalue_thresh Alpha threshold for differential significance.
+#' @return List with structured edge table and network topologies.
+compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, seed = 123, n_cores = 1, pvalue_thresh = 0.05) {
+  requireNamespace("parallel", quietly = TRUE)
+  requireNamespace("doParallel", quietly = TRUE)
+  requireNamespace("foreach", quietly = TRUE)
+  requireNamespace("corpcor", quietly = TRUE)
+  
+  label_ctrl <- base_ctrl$label
+  label_case <- base_case$label
+  mat_ctrl <- base_ctrl$mat
+  mat_case <- base_case$mat
+  
+  message(sprintf("      [DiffNet] Overlaying %s vs %s (Perm=%d, Cores=%d)", label_ctrl, label_case, n_perm, n_cores))
+  
+  stable_mask <- base_ctrl$adj_final | base_case$adj_final
   n_stable_edges <- sum(stable_mask[upper.tri(stable_mask)])
-  message(sprintf("      [DiffNet] Found %d valid edges (Stable + Magnitude) across independent baselines.", n_stable_edges))
   
   if (n_stable_edges == 0) {
+    message("      [DiffNet] No valid edges found in either baseline. Returning empty results.")
     return(list(
-      edges_table = data.frame(), 
-      networks = list(ctrl = obs_ctrl, case = obs_case), 
-      adj_final = list(ctrl = adj_ctrl_final, case = adj_case_final)
+      edges_table = data.frame(),
+      networks = list(ctrl = base_ctrl$pcor, case = base_case$pcor),
+      adj_final = list(ctrl = base_ctrl$adj_final, case = base_case$adj_final)
     ))
   }
   
-  # --- STEP 3: PERMUTATION TEST ---
-  message("      [DiffNet] 2/3 Running Permutation Test...")
+  cl <- parallel::makeCluster(n_cores)
+  on.exit({
+    if(!is.null(cl)) try(parallel::stopCluster(cl), silent=TRUE)
+  }, add = TRUE)
+  doParallel::registerDoParallel(cl)
+  parallel::clusterEvalQ(cl, { library(corpcor) })
+  parallel::clusterExport(cl, varlist = c("infer_network_pcor"), envir = environment())
+  parallel::clusterSetRNGStream(cl, seed)
   
+  # 1. PERMUTATION TEST
   pool_mat <- rbind(mat_ctrl, mat_case)
   n1 <- nrow(mat_ctrl)
-  n2 <- nrow(mat_case)
-  n_total <- n1 + n2
+  n_total <- nrow(pool_mat)
   
   null_diffs <- foreach::foreach(i = 1:n_perm, .packages = "corpcor") %dopar% {
     shuffled_idx <- sample(1:n_total)
     p1 <- pool_mat[shuffled_idx[1:n1], ]
     p2 <- pool_mat[shuffled_idx[(n1 + 1):n_total], ]
-    
     r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
     r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
     abs(r1 - r2)
   }
   
-  # --- STEP 4: P-VALUE & FDR ---
-  message("      [DiffNet] 3/3 calculating statistics and categorizing edges...")
-  
+  # 2. STATS & P-VALUES
+  obs_diff <- abs(base_ctrl$pcor - base_case$pcor)
   nodes <- colnames(mat_ctrl)
   edges_idx <- which(upper.tri(stable_mask) & stable_mask, arr.ind = TRUE)
   
@@ -236,9 +249,6 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     i <- edges_idx[k,1]
     j <- edges_idx[k,2]
     
-    w_ctrl <- obs_ctrl[i,j]
-    w_case <- obs_case[i,j]
-    
     obs_val <- obs_diff[i,j]
     null_vals <- sapply(null_diffs, function(m) m[i, j])
     p_val <- (sum(null_vals >= obs_val) + 1) / denom
@@ -246,14 +256,13 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
     test_ctrl <- tryCatch(suppressWarnings(cor.test(mat_ctrl[,i], mat_ctrl[,j], method = "pearson")), error = function(e) list(p.value = NA))
     test_case <- tryCatch(suppressWarnings(cor.test(mat_case[,i], mat_case[,j], method = "pearson")), error = function(e) list(p.value = NA))
     
-    is_valid_ctrl <- adj_ctrl_final[i,j]
-    is_valid_case <- adj_case_final[i,j]
-    is_relevant <- is_valid_ctrl | is_valid_case
-    
+    is_valid_ctrl <- base_ctrl$adj_final[i,j]
+    is_valid_case <- base_case$adj_final[i,j]
     category <- "Weak"
-    if (is_relevant) {
+    
+    if (is_valid_ctrl || is_valid_case) {
       if (is_valid_ctrl && is_valid_case) {
-        same_sign <- (sign(w_ctrl) == sign(w_case))
+        same_sign <- (sign(base_ctrl$pcor[i,j]) == sign(base_case$pcor[i,j]))
         category <- ifelse(same_sign, "Conserved", "Inverted")
       } else {
         category <- "Specific"
@@ -264,13 +273,13 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
       Node1 = nodes[i],
       Node2 = nodes[j],
       Pval_Cor_Ctrl = test_ctrl$p.value,
-      Cor_Ctrl = raw_cor_ctrl[i,j],   
-      Weight_Ctrl = w_ctrl,    
+      Cor_Ctrl = base_ctrl$raw_cor[i,j],
+      Weight_Ctrl = base_ctrl$pcor[i,j],
       Pval_Cor_Case = test_case$p.value,
-      Cor_Case = raw_cor_case[i,j],   
-      Weight_Case = w_case,    
-      Is_Stable_Ctrl = agg_ctrl$adj[i,j] == 1,
-      Is_Stable_Case = agg_case$adj[i,j] == 1,
+      Cor_Case = base_case$raw_cor[i,j],
+      Weight_Case = base_case$pcor[i,j],
+      Is_Stable_Ctrl = base_ctrl$stability[i,j] == 1,
+      Is_Stable_Case = base_case$stability[i,j] == 1,
       Is_Valid_Ctrl = is_valid_ctrl,
       Is_Valid_Case = is_valid_case,
       Diff_Score = obs_val,
@@ -284,8 +293,8 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
   res_df$Significant <- res_df$P_Value < pvalue_thresh
   
-  res_df <- res_df %>% 
-    arrange(factor(Edge_Category, levels = c("Inverted", "Specific", "Conserved", "Weak")), P_Value)
+  res_df <- res_df %>%
+    dplyr::arrange(factor(Edge_Category, levels = c("Inverted", "Specific", "Conserved", "Weak")), P_Value)
   
   colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Pcor_", label_ctrl)
   colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Pcor_", label_case)
@@ -300,11 +309,11 @@ run_differential_network <- function(mat_ctrl, mat_case, n_boot = 100, n_perm = 
   
   return(list(
     edges_table = res_df,
-    networks = list(ctrl = obs_ctrl, case = obs_case),
-    raw_cor = list(ctrl = raw_cor_ctrl, case = raw_cor_case),
-    adj_final = list(ctrl = adj_ctrl_final, case = adj_case_final),
-    stability = list(ctrl = agg_ctrl$adj, case = agg_case$adj),
-    applied_threshold = actual_thresh
+    networks = list(ctrl = base_ctrl$pcor, case = base_case$pcor),
+    raw_cor = list(ctrl = base_ctrl$raw_cor, case = base_case$raw_cor),
+    adj_final = list(ctrl = base_ctrl$adj_final, case = base_case$adj_final),
+    stability = list(ctrl = base_ctrl$stability, case = base_case$stability),
+    applied_threshold = base_ctrl$applied_threshold
   ))
 }
 

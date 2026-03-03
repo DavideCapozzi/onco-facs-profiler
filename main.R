@@ -157,35 +157,18 @@ tryCatch({
             if(!sheet_name %in% names(wb_master)) addWorksheet(wb_master, sheet_name)
             writeData(wb_master, sheet_name, res$drivers)
           }
-          
-          # Network Diff
-          if (!is.null(res$network$edges_table) && nrow(res$network$edges_table) > 0) {
-            sheet_name <- substr(paste0(scen_id, "_Net"), 1, 31)
-            if(!sheet_name %in% names(wb_master)) addWorksheet(wb_master, sheet_name)
-            writeData(wb_master, sheet_name, res$network$edges_table)
-            
-            sig_edges_master <- res$network$edges_table %>%
-              dplyr::filter(Edge_Category != "Weak" & Significant == TRUE) %>%
-              dplyr::arrange(P_Value)
-            
-            if (nrow(sig_edges_master) > 0) {
-              sheet_name_sig <- substr(paste0(scen_id, "_SigNet"), 1, 31)
-              if(!sheet_name_sig %in% names(wb_master)) addWorksheet(wb_master, sheet_name_sig)
-              writeData(wb_master, sheet_name_sig, sig_edges_master)
-            }
-          }
         }
         
         out_file <- file.path(results_root, "Multi_Scenario_Analysis_Report.xlsx")
         saveWorkbook(wb_master, out_file, overwrite = TRUE)
-        message(sprintf("       -> Saved Master Report: %s", out_file))
+        message(sprintf("       -> Saved Master Report (Stats Only): %s", out_file))
       }
       
       # ------------------------------------------------------------------------
-      # PHASE 3: META-ANALYSIS (Now strictly depends on existing Master Report)
+      # PHASE 3: NETWORK ANALYSIS & META-ANALYSIS 
       # ------------------------------------------------------------------------
-      message("\n>>> RUNNING PHASE 3: META-ANALYSIS & CHARACTERIZATION <<<")
-      source(here("src/04_network_meta_analysis.R"), echo = FALSE)
+      message("\n>>> RUNNING PHASE 3: NETWORK ANALYSIS & CHARACTERIZATION <<<")
+      source(here("src/04_network_analysis.R"), echo = FALSE)
       
     }
     
