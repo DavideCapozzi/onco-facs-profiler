@@ -68,109 +68,15 @@ tryCatch({
     source(here("src/01_data_processing.R"), echo = FALSE)
     source(here("src/02_visualization.R"), echo = FALSE)
     
-    # --- PHASE 2: COMPARATIVE ANALYSIS (SCENARIOS) ---
-    message("\n>>> RUNNING PHASE 2: COMPARATIVE ANALYSIS (SCENARIOS) <<<")
+    # --- PHASE 2: STATISTICAL ANALYSIS & SCENARIOS ---
+    message("\n>>> RUNNING PHASE 2: STATISTICAL ANALYSIS & SCENARIOS <<<")
     
-    data_file <- file.path(here(config$output_root), "01_data_processing", "data_processed.rds")
-    if (!file.exists(data_file)) stop("CRITICAL: Processed data not found.")
-    processed_data <- readRDS(data_file)
+    source(here("src/03_statistical_analysis.R"), echo = FALSE)
     
-    results_root <- file.path(here(config$output_root), "results_analysis")
-    if (!dir.exists(results_root)) dir.create(results_root, recursive = TRUE)
+    # --- PHASE 3: NETWORK ANALYSIS & META-ANALYSIS ---
+    message("\n>>> RUNNING PHASE 3: NETWORK ANALYSIS & META-ANALYSIS <<<")
     
-    if (is.null(config$analysis_scenarios) || length(config$analysis_scenarios) == 0) {
-      warning("[Main] No 'analysis_scenarios' found in config. Skipping Phase 2.")
-    } else {
-      
-      all_results <- list()
-      
-      for (scenario in config$analysis_scenarios) {
-        message(sprintf("\n--- Executing Scenario: %s ---", scenario$id))
-        
-        tryCatch({
-          res <- run_comparative_workflow(
-            data_list = processed_data, 
-            scenario = scenario, 
-            config = config, 
-            output_root = results_root
-          )
-          all_results[[scenario$id]] <- res
-          
-        }, error = function(e) {
-          # Log error but continue pipeline
-          message(sprintf("!!! [Error] Scenario '%s' failed: %s", scenario$id, e$message))
-        })
-      } # End of scenarios loop
-      
-      # ------------------------------------------------------------------------
-      # CONSOLIDATED REPORTING (Must execute before Phase 3)
-      # ------------------------------------------------------------------------
-      if (length(all_results) > 0) {
-        message("\n[Main] Generating Consolidated Multi-Scenario Report...")
-        
-        wb_master <- createWorkbook()
-        
-        # A. Global Drivers (Standardized Summary)
-        combined_drivers_list <- lapply(names(all_results), function(scen_id) {
-          res <- all_results[[scen_id]]
-          if (is.null(res$drivers) || nrow(res$drivers) == 0) return(NULL)
-          
-          df <- res$drivers
-          df$Scenario <- scen_id 
-          
-          df_clean <- df %>%
-            dplyr::rename_with(
-              .fn = ~ "Weight_Case_VS_Control_PC1", 
-              .cols = dplyr::matches("^Weight_.*_PC1$")
-            ) %>%
-            dplyr::rename_with(
-              .fn = ~ "Weight_Case_VS_Control_PC2", 
-              .cols = dplyr::matches("^Weight_.*_PC2$")
-            ) %>%
-            dplyr::select(Scenario, Marker, dplyr::matches("^Weight_Case_VS_Control_PC[12]$"))
-          
-          return(df_clean)
-        })
-        
-        combined_drivers <- dplyr::bind_rows(combined_drivers_list)
-        
-        if (nrow(combined_drivers) > 0) {
-          addWorksheet(wb_master, "All_Drivers_Summary")
-          writeData(wb_master, "All_Drivers_Summary", combined_drivers)
-        }
-        
-        # B. Scenario Sheets
-        for (scen_id in names(all_results)) {
-          res <- all_results[[scen_id]]
-          if (is.null(res)) next
-          
-          # PERMANOVA
-          if (!is.null(res$permanova)) {
-            sheet_name <- substr(paste0(scen_id, "_Perm"), 1, 31)
-            if(!sheet_name %in% names(wb_master)) addWorksheet(wb_master, sheet_name)
-            writeData(wb_master, sheet_name, res$permanova, rowNames = TRUE)
-          }
-          
-          # Drivers
-          if (!is.null(res$drivers) && nrow(res$drivers) > 0) {
-            sheet_name <- substr(paste0(scen_id, "_Drv"), 1, 31)
-            if(!sheet_name %in% names(wb_master)) addWorksheet(wb_master, sheet_name)
-            writeData(wb_master, sheet_name, res$drivers)
-          }
-        }
-        
-        out_file <- file.path(results_root, "Multi_Scenario_Analysis_Report.xlsx")
-        saveWorkbook(wb_master, out_file, overwrite = TRUE)
-        message(sprintf("       -> Saved Master Report (Stats Only): %s", out_file))
-      }
-      
-      # ------------------------------------------------------------------------
-      # PHASE 3: NETWORK ANALYSIS & META-ANALYSIS 
-      # ------------------------------------------------------------------------
-      message("\n>>> RUNNING PHASE 3: NETWORK ANALYSIS & CHARACTERIZATION <<<")
-      source(here("src/04_network_analysis.R"), echo = FALSE)
-      
-    }
+    source(here("src/04_network_analysis.R"), echo = FALSE)
     
     final_msg <- sprintf("\n=== PIPELINE FINISHED SUCCESSFULLY: %s ===", Sys.time())
     message(final_msg)

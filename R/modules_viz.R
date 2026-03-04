@@ -652,6 +652,62 @@ viz_plot_signature_boxplots <- function(data_matrix, group_factor, loadings_df,
   return(p)
 }
 
+#' @title Plot sPLS-DA Signature Heatmap
+#' @description 
+#' Custom heatmap for sPLS-DA markers with patients on rows and markers on columns.
+#' @param mat_z Numeric matrix of Z-scored data (Patients x Markers).
+#' @param metadata Dataframe with patient metadata.
+#' @param group_col Column name defining the group.
+#' @param colors Named vector of group colors.
+#' @param title Plot title.
+#' @return A ComplexHeatmap object.
+viz_plot_splsda_heatmap <- function(mat_z, metadata, group_col, colors, title = "Global Signature Heatmap") {
+  requireNamespace("ComplexHeatmap", quietly = TRUE)
+  requireNamespace("circlize", quietly = TRUE)
+  requireNamespace("grid", quietly = TRUE)
+  
+  if (!all(rownames(mat_z) == metadata$Patient_ID)) {
+    stop("Mismatch between matrix rownames and metadata Patient_ID")
+  }
+  
+  # Setup Row Annotations (Patients)
+  meta_df <- as.data.frame(metadata[, group_col, drop = FALSE])
+  anno_colors <- list()
+  anno_colors[[group_col]] <- colors
+  
+  ra <- ComplexHeatmap::rowAnnotation(
+    df = meta_df,
+    col = anno_colors,
+    show_annotation_name = FALSE,
+    simple_anno_size = grid::unit(0.4, "cm")
+  )
+  
+  # Standardized Z-Score color mapping
+  col_fun <- circlize::colorRamp2(c(-3, 0, 3), c("#2166AC", "#F7F7F7", "#B2182B"))
+  
+  hm <- ComplexHeatmap::Heatmap(
+    mat_z, 
+    name = "Z-Score",
+    col = col_fun,
+    cluster_rows = TRUE,
+    cluster_columns = TRUE,
+    clustering_distance_rows = "euclidean",
+    clustering_method_rows = "ward.D2",
+    clustering_distance_columns = "euclidean",
+    clustering_method_columns = "ward.D2",
+    left_annotation = ra,
+    row_names_gp = grid::gpar(fontsize = 7),
+    column_names_gp = grid::gpar(fontsize = 8),
+    show_row_names = TRUE,
+    show_column_names = TRUE,
+    column_title = title,
+    row_title = "Patients",
+    column_title_side = "top"
+  )
+  
+  return(hm)
+}
+
 #' @title Report sPLS-DA Visualization 
 #' @description 
 #' Generates a comprehensive PDF report for sPLS-DA results.
@@ -668,65 +724,69 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
   if (is.null(pls_res$model)) return(NULL)
   
   requireNamespace("mixOmics", quietly = TRUE)
+  requireNamespace("ComplexHeatmap", quietly = TRUE)
   require(ggplot2)
   require(dplyr)
   require(tidyr)
+  require(ggrepel)
   
   message(sprintf("   [Viz] Generating sPLS-DA graphical report: %s", basename(out_path)))
   
-  # Validate column existence immediately
   if (!group_col %in% names(metadata_viz)) {
     stop(sprintf("Column '%s' not found in metadata for sPLS-DA visualization.", group_col))
   }
   
-  # Open PDF and ensure it closes using on.exit immediately
   pdf(out_path, width = 11, height = 8)
-  # This ensures dev.off() is called even if the code below crashes
   on.exit(try(dev.off(), silent = TRUE), add = TRUE) 
   
-  # Setup data for plotting
-  # Use the dynamic column specified by group_col
   plot_group_factor <- as.factor(metadata_viz[[group_col]])
-  
-  # Map colors safely
-  # We subset colors_viz by the levels present in the data to avoid mismatches
   levels_present <- levels(plot_group_factor)
   plot_colors <- colors_viz[levels_present]
   
-  # Fallback for missing colors
   if (any(is.na(plot_colors))) {
     missing_grps <- levels_present[is.na(plot_colors)]
     warning(paste("Missing colors for:", paste(missing_grps, collapse=", ")))
-    # Assign gray to missing colors
     plot_colors[is.na(plot_colors)] <- "gray50"
     names(plot_colors) <- levels_present
   }
   
   n_comps <- pls_res$model$ncomp
   
-  # 1. Indiv Biplot
-  # Note: mixOmics plotIndiv usually expects 'group' as a vector matching X rows
+  # 1. Native ggplot2 Biplot (Bypassing mixOmics wrapper to guarantee color/legend alignment)
   tryCatch({
-    mixOmics::plotIndiv(pls_res$model, 
-                        comp = c(1,2), 
-                        group = plot_group_factor, 
-                        col.per.group = plot_colors, 
-                        ellipse = TRUE, 
-                        legend = TRUE, 
-                        title = "sPLS-DA: Model Separation",
-                        subtitle = paste("Grouping by:", group_col),
-                        star.plot = TRUE)
+    variates_df <- as.data.frame(pls_res$model$variates$X[, 1:2, drop = FALSE])
+    colnames(variates_df) <- c("PC1", "PC2")
+    variates_df$Group <- plot_group_factor
+    variates_df$Patient_ID <- rownames(pls_res$model$variates$X)
+    
+    var_pct <- round(pls_res$model$prop_expl_var$X[1:2] * 100, 1)
+    
+    p_biplot <- ggplot(variates_df, aes(x = PC1, y = PC2, color = Group, fill = Group)) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "gray70") +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "gray70") +
+      stat_ellipse(geom = "polygon", alpha = 0.1, level = 0.95, show.legend = FALSE) +
+      geom_point(size = 3.5, shape = 21, color = "white", stroke = 0.5) +
+      geom_text_repel(aes(label = Patient_ID), size = 3, show.legend = FALSE, max.overlaps = 20) +
+      scale_fill_manual(values = plot_colors) +
+      scale_color_manual(values = plot_colors) +
+      labs(
+        title = "sPLS-DA: Model Separation",
+        subtitle = paste("Grouping by:", group_col),
+        x = sprintf("X-variate 1: %s%% expl. var", var_pct[1]),
+        y = sprintf("X-variate 2: %s%% expl. var", var_pct[2])
+      ) +
+      theme_coda()
+    
+    print(p_biplot)
   }, error = function(e) {
     plot.new(); text(0.5, 0.5, paste("Biplot Error:", e$message))
   })
   
-  # Iterate over components for Loadings
+  # 2. Loadings & Boxplots
   for (i in 1:n_comps) {
-    
     comp_col <- paste0("Comp", i, "_Weight")
     if (!comp_col %in% names(drivers_df)) next
     
-    # Auto-Detection Logic for Association Direction
     variates <- pls_res$model$variates$X[, i]
     stat_groups <- plot_group_factor
     group_means <- tapply(variates, stat_groups, mean)
@@ -734,39 +794,29 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     pos_group_name <- names(group_means)[which.max(group_means)]
     neg_group_name <- names(group_means)[which.min(group_means)]
     
-    label_sub <- sprintf("Direction: Positive -> %s | Negative -> %s", 
-                         pos_group_name, neg_group_name)
+    label_sub <- sprintf("Direction: Positive -> %s | Negative -> %s", pos_group_name, neg_group_name)
     
-    # Prepare fill colors for the bar plot
     current_fill_colors <- c()
     if(pos_group_name %in% names(plot_colors)) current_fill_colors[[pos_group_name]] <- plot_colors[[pos_group_name]]
     if(neg_group_name %in% names(plot_colors)) current_fill_colors[[neg_group_name]] <- plot_colors[[neg_group_name]]
-    
-    # Fill missing with gray if necessary
     if(is.null(current_fill_colors[[pos_group_name]])) current_fill_colors[[pos_group_name]] <- "gray"
     if(is.null(current_fill_colors[[neg_group_name]])) current_fill_colors[[neg_group_name]] <- "gray"
     
     df_comp <- drivers_df[abs(drivers_df[[comp_col]]) > 0, ]
     
     if (nrow(df_comp) > 0) {
-      # Determine association based on weight sign
       df_comp$Association <- ifelse(df_comp[[comp_col]] > 0, pos_group_name, neg_group_name)
       
-      # 2. Loading Plot 
       p_load <- ggplot(df_comp, aes(x = reorder(Marker, abs(.data[[comp_col]])), 
-                                    y = .data[[comp_col]], 
-                                    fill = Association)) +
+                                    y = .data[[comp_col]], fill = Association)) +
         geom_bar(stat = "identity", width = 0.7) +
         coord_flip() +
         scale_fill_manual(values = current_fill_colors) +
         labs(title = sprintf("sPLS-DA Loadings (Component %d)", i), 
-             subtitle = label_sub,
-             x = "Marker", y = "Weight Contribution",
-             fill = "Associated Group") +
+             subtitle = label_sub, x = "Marker", y = "Weight Contribution", fill = "Associated Group") +
         theme_coda() + theme(legend.position = "bottom")
       print(p_load)
       
-      # 3. Signature Boxplots (Helper function assumed to be present)
       if(exists("viz_plot_signature_boxplots")) {
         p_box <- viz_plot_signature_boxplots(
           data_matrix = pls_res$model$X, 
@@ -781,27 +831,28 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     }
   }
   
-  # 4. Clustered Image Map (CIM)
+  # 3. Transposed Signature Heatmap
   if (nrow(drivers_df) > 1) {
     tryCatch({
-      # Map row side colors using the correctly matched vectors
-      groups_vec <- as.character(metadata_viz[[group_col]])
-      row_cols <- plot_colors[groups_vec]
+      mks <- unique(drivers_df$Marker)
+      mat_sub <- pls_res$model$X[, mks, drop = FALSE]
       
-      # Check for NAs in colors before plotting
-      row_cols[is.na(row_cols)] <- "grey"
+      # Use metadata exactly matching the matrix rows
+      meta_hm <- metadata_viz[match(rownames(mat_sub), metadata_viz$Patient_ID), ]
       
-      mixOmics::cim(pls_res$model, 
-                    row.sideColors = row_cols,
-                    title = "Global Signature Heatmap (CIM)",
-                    margins = c(7, 7),
-                    save = NULL) 
+      hm <- viz_plot_splsda_heatmap(
+        mat_z = mat_sub,
+        metadata = meta_hm,
+        group_col = group_col,
+        colors = plot_colors,
+        title = "sPLS-DA Signature Heatmap"
+      )
+      
+      ComplexHeatmap::draw(hm, merge_legend = TRUE)
     }, error = function(e) {
-      plot.new(); text(0.5, 0.5, paste("CIM Error:", e$message))
+      plot.new(); text(0.5, 0.5, paste("Heatmap Error:", e$message))
     })
   }
-  
-  # dev.off() is handled by on.exit() automatically
 }
 
 #' @title Plot Network Graph (ggraph)

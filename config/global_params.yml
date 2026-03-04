@@ -59,7 +59,7 @@ marker_selection:
 
 sample_selection:
   #blacklist: ["DS51.fcs"]
-  blacklist: ["HD51"]  
+  blacklist: ["HD51", "HNSCC21"]  
 
 hybrid_groups:
   Differentiation: []
@@ -196,7 +196,7 @@ stats:
   alpha: 0.05         
   pvalue_threshold: 0.05
   network_threshold_type: "percentile"
-  network_edge_threshold: 0.0
+  network_edge_threshold: 0.85
   n_cores: "auto"
 
 EOF: TRUE
