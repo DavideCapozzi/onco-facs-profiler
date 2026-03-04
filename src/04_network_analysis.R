@@ -28,11 +28,14 @@ master_report_path <- file.path(results_dir, "Multi_Scenario_Analysis_Report.xls
 if (!file.exists(master_report_path)) stop("[Fatal] Master Report from Step 03 not found.")
 
 # ==============================================================================
-# PHASE 1: COMPUTE UNIVERSAL BASELINES
+# PHASE 1: COMPUTE UNIVERSAL BASELINES & CENTRALIZED EXPORT
 # ==============================================================================
 message("\n--- PHASE 1: GENERATING UNIVERSAL BASELINES ---")
 
-# Collect unique macro-groups required across all scenarios
+# Setup centralized Cytoscape folder for absolute baseline networks
+cyto_base_dir <- file.path(results_dir, "cytoscape_baselines")
+if (!dir.exists(cyto_base_dir)) dir.create(cyto_base_dir, recursive = TRUE)
+
 macro_groups <- list()
 for (scen in config$analysis_scenarios) {
   macro_groups[[scen$control_label]] <- unique(c(macro_groups[[scen$control_label]], scen$control_groups))
@@ -67,7 +70,8 @@ for (label in names(macro_groups)) {
     }
   }
   
-  baselines[[label]] <- compute_universal_baseline(
+  # Compute Baseline
+  base_obj <- compute_universal_baseline(
     mat = sub_mat,
     label = label,
     n_boot = if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100,
@@ -76,6 +80,28 @@ for (label in names(macro_groups)) {
     threshold_type = if(!is.null(config$stats$network_threshold_type)) config$stats$network_threshold_type else "percentile",
     threshold_value = if(!is.null(config$stats$network_edge_threshold)) config$stats$network_edge_threshold else 0.15
   )
+  baselines[[label]] <- base_obj
+  
+  # Centralized Cytoscape Baseline Export (Only valid edges, inherently drops "weak" concepts)
+  adj <- base_obj$adj_final
+  edges_idx <- which(upper.tri(adj) & adj, arr.ind = TRUE)
+  
+  if (nrow(edges_idx) > 0) {
+    nodes <- colnames(adj)
+    base_edges <- data.frame(
+      Source = nodes[edges_idx[,1]],
+      Target = nodes[edges_idx[,2]],
+      Pcor = base_obj$pcor[edges_idx],
+      Is_Stable = TRUE,
+      stringsAsFactors = FALSE
+    )
+    readr::write_csv(base_edges, file.path(cyto_base_dir, paste0(label, "_baseline_network.csv")))
+    
+    topo_base <- calculate_node_topology(adj)
+    if (!is.null(topo_base)) {
+      readr::write_csv(topo_base, file.path(cyto_base_dir, paste0(label, "_node_attributes.csv")))
+    }
+  }
 }
 
 # ==============================================================================
@@ -101,7 +127,6 @@ for (scen in config$analysis_scenarios) {
   scen_dir <- file.path(results_dir, scen$id)
   if (!dir.exists(scen_dir)) dir.create(scen_dir, recursive = TRUE)
   
-  # Run Overlay
   net_res <- compute_differential_overlay(
     base_ctrl = base_ctrl,
     base_case = base_case,
@@ -113,7 +138,12 @@ for (scen in config$analysis_scenarios) {
   
   if (!is.null(net_res) && nrow(net_res$edges_table) > 0) {
     
-    # Extract sPLS-DA drivers from Master Report for Hub-Driver mapping
+    # Restored: Save Raw RDS Object
+    rds_path <- file.path(scen_dir, paste0(scen$id, "_Differential_Network.rds"))
+    saveRDS(net_res, rds_path)
+    message(sprintf("      [Output] Network RDS saved: %s", basename(rds_path)))
+    
+    # Extract sPLS-DA drivers from Master Report
     drv_sheet <- substr(paste0(scen$id, "_Drv"), 1, 31)
     spls_drivers <- NULL
     if (drv_sheet %in% names(wb_master)) {
@@ -144,14 +174,35 @@ for (scen in config$analysis_scenarios) {
     addWorksheet(wb_topo, "Differential_Edges"); writeData(wb_topo, "Differential_Edges", net_res$edges_table)
     saveWorkbook(wb_topo, topo_xlsx_path, overwrite = TRUE)
     
-    # Save Plot PDFs
-    pdf_hd_path <- file.path(scen_dir, paste0(scen$id, "_Hub_Driver_Report.pdf"))
+    # Restored: Save Hub-Driver PDF with exact original name
+    pdf_hd_path <- file.path(scen_dir, paste0(scen$id, "_Hub_Driver_Report_4Page.pdf"))
     if (!is.null(spls_drivers) && nrow(spls_drivers) > 0 && (!is.null(topo_ctrl) || !is.null(topo_case))) {
       pdf(pdf_hd_path, width = 11, height = 8)
-      if(!is.null(topo_ctrl)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_ctrl, "Degree"), "Degree", paste("Network:", scen$control_label)))
-      if(!is.null(topo_case)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_case, "Degree"), "Degree", paste("Network:", scen$case_label)))
+      if(!is.null(topo_ctrl)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_ctrl, "Degree"), "Degree", paste("\nNetwork:", scen$control_label)))
+      if(!is.null(topo_case)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_case, "Degree"), "Degree", paste("\nNetwork:", scen$case_label)))
+      if(!is.null(topo_ctrl)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_ctrl, "Betweenness"), "Betweenness", paste("\nNetwork:", scen$control_label)))
+      if(!is.null(topo_case)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_case, "Betweenness"), "Betweenness", paste("\nNetwork:", scen$case_label)))
       dev.off()
     }
+    
+    # Restored: Edge Distribution Visualization
+    dist_pdf_path <- file.path(scen_dir, paste0(scen$id, "_Edge_Distribution.pdf"))
+    pdf(dist_pdf_path, width = 8, height = 6)
+    thresh_to_plot <- net_res$applied_threshold
+    
+    if(sum(abs(net_res$networks$ctrl) > 0) > 0) {
+      print(viz_plot_edge_density(net_res$networks$ctrl, adj_mat = net_res$adj_final$ctrl, threshold = thresh_to_plot, group_label = scen$control_label))
+      if (!is.null(net_res$raw_cor$ctrl)) {
+        print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$ctrl, cor_mat = net_res$raw_cor$ctrl, adj_mat = net_res$adj_final$ctrl, threshold = thresh_to_plot, group_label = scen$control_label))
+      }
+    }
+    if(sum(abs(net_res$networks$case) > 0) > 0) {
+      print(viz_plot_edge_density(net_res$networks$case, adj_mat = net_res$adj_final$case, threshold = thresh_to_plot, group_label = scen$case_label))
+      if (!is.null(net_res$raw_cor$case)) {
+        print(viz_plot_edge_density_overlay(pcor_mat = net_res$networks$case, cor_mat = net_res$raw_cor$case, adj_mat = net_res$adj_final$case, threshold = thresh_to_plot, group_label = scen$case_label))
+      }
+    }
+    dev.off()
     
     pdf_net_path <- file.path(scen_dir, paste0(scen$id, "_Plot_Networks.pdf"))
     pdf(pdf_net_path, width = 12, height = 6)
@@ -159,14 +210,35 @@ for (scen in config$analysis_scenarios) {
     if(!is.null(topo_case)) print(plot_network_structure(net_res$adj_final$case, net_res$networks$case, title = paste("Case:", scen$case_label), min_cor = 0))
     dev.off()
     
-    # Cytoscape EXPORT
+    # Cytoscape EXPORT (Differential Only)
     cyto_dir <- file.path(scen_dir, "cytoscape_export")
     if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
-    readr::write_csv(net_res$edges_table %>% filter(Significant == TRUE), file.path(cyto_dir, paste0(scen$id, "_diff_network.csv")))
     
+    diff_edges <- net_res$edges_table %>% filter(Significant == TRUE & Edge_Category != "Weak")
+    if (nrow(diff_edges) > 0) {
+      col_pcor_ctrl <- paste0("Pcor_", scen$control_label)
+      col_pcor_case <- paste0("Pcor_", scen$case_label)
+      diff_net <- diff_edges %>%
+        dplyr::select(Source = Node1, Target = Node2, Weight = Diff_Score,
+                      Pcor_Control = .data[[col_pcor_ctrl]], Pcor_Case = .data[[col_pcor_case]],
+                      Edge_Category, Significant, P_Value) %>%
+        dplyr::mutate(Interaction = Edge_Category)
+      readr::write_csv(diff_net, file.path(cyto_dir, paste0(scen$id, "_diff_network.csv")))
+    }
+    
+    # Scenario-specific Node Attributes (Combines Topology + sPLS-DA Drivers)
     all_nodes <- data.frame(Node = unique(c(net_res$edges_table$Node1, net_res$edges_table$Node2)), stringsAsFactors=F)
-    if(!is.null(topo_ctrl)) all_nodes <- left_join(all_nodes, topo_ctrl %>% select(Node, Degree) %>% rename(!!paste0("Degree_", scen$control_label) := Degree), by="Node")
-    if(!is.null(topo_case)) all_nodes <- left_join(all_nodes, topo_case %>% select(Node, Degree) %>% rename(!!paste0("Degree_", scen$case_label) := Degree), by="Node")
+    if(!is.null(topo_ctrl)) all_nodes <- left_join(all_nodes, topo_ctrl %>% select(Node, Degree, Betweenness) %>% rename(!!paste0("Degree_", scen$control_label) := Degree, !!paste0("Betweenness_", scen$control_label) := Betweenness), by="Node")
+    if(!is.null(topo_case)) all_nodes <- left_join(all_nodes, topo_case %>% select(Node, Degree, Betweenness) %>% rename(!!paste0("Degree_", scen$case_label) := Degree, !!paste0("Betweenness_", scen$case_label) := Betweenness), by="Node")
+    
+    if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
+      drv_summ <- spls_drivers %>% dplyr::group_by(Marker) %>% dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
+        dplyr::ungroup() %>% dplyr::select(Marker, Importance, Direction) %>% rename(PLSDA_Importance = Importance, PLSDA_Direction = Direction)
+      all_nodes <- left_join(all_nodes, drv_summ, by = c("Node" = "Marker"))
+    }
+    
+    numeric_cols <- names(all_nodes)[sapply(all_nodes, is.numeric)]
+    all_nodes[numeric_cols] <- lapply(all_nodes[numeric_cols], function(x) replace(x, is.na(x), 0))
     readr::write_csv(all_nodes, file.path(cyto_dir, paste0(scen$id, "_node_attributes.csv")))
     
     # Append to Master Report
@@ -180,7 +252,6 @@ for (scen in config$analysis_scenarios) {
       if(!sig_sheet %in% names(wb_master)) addWorksheet(wb_master, sig_sheet)
       writeData(wb_master, sig_sheet, sig_edges)
       
-      # Prepare for Meta-Analysis
       edge_ids <- apply(sig_edges, 1, function(r) paste(sort(c(r["Node1"], r["Node2"])), collapse="~"))
       diff_edges_list[[scen$id]] <- unique(edge_ids)
       
