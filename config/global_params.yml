@@ -195,8 +195,8 @@ stats:
   n_perm: 2000        
   alpha: 0.05         
   pvalue_threshold: 0.05
-  network_threshold_type: "percentile"
-  network_edge_threshold: 0.85
+  network_threshold_type: "absolute"
+  network_edge_threshold: 0.10
   n_cores: "auto"
 
 EOF: TRUE

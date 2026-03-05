@@ -180,17 +180,20 @@ if (is.null(config$analysis_scenarios) || length(config$analysis_scenarios) == 0
       message(sprintf("      [Info] Samples: %s=%d vs %s=%d", 
                       names(counts)[1], counts[1], names(counts)[2], counts[2]))
       
-      # 3.2 Micro-Jittering (Universal Space Protection)
+      # 3.2 Zero-Variance Filtering (Universal Space Protection)
       var_thresh <- if(!is.null(config$stats$min_variance)) config$stats$min_variance else 1e-6
       vars <- apply(sub_mat, 2, var, na.rm = TRUE)
       low_vars <- vars < var_thresh | is.na(vars)
       
       if (sum(low_vars) > 0) {
         dropped_names <- names(vars)[low_vars]
-        message(sprintf("      [Prep] Injecting micro-jitter for %d flat features.", sum(low_vars)))
-        set.seed(if(!is.null(config$stats$seed)) config$stats$seed else 123)
-        for (col in dropped_names) {
-          sub_mat[, col] <- sub_mat[, col] + rnorm(nrow(sub_mat), mean = 0, sd = 1e-8)
+        message(sprintf("      [Prep] Dropping %d flat features with zero pooled variance: %s", 
+                        sum(low_vars), paste(dropped_names, collapse = ", ")))
+        sub_mat <- sub_mat[, !low_vars, drop = FALSE]
+        
+        if (ncol(sub_mat) < 2) {
+          message("      [Skip] Less than 2 features remaining after variance filter.")
+          next
         }
       }
       

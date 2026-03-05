@@ -56,23 +56,28 @@ for (label in names(macro_groups)) {
     next
   }
   
-  # Inject Micro-Jitter
+  # Zero-Variance Detection & Subset
   var_thresh <- if(!is.null(config$stats$min_variance)) config$stats$min_variance else 1e-6
   vars <- apply(sub_mat, 2, var, na.rm = TRUE)
   low_vars <- vars < var_thresh | is.na(vars)
   
-  if (sum(low_vars) > 0) {
-    dropped_names <- names(vars)[low_vars]
-    message(sprintf("   [%s] Injecting micro-jitter for %d flat features.", label, sum(low_vars)))
-    set.seed(if(!is.null(config$stats$seed)) config$stats$seed else 123)
-    for (col in dropped_names) {
-      sub_mat[, col] <- sub_mat[, col] + rnorm(nrow(sub_mat), mean = 0, sd = 1e-8)
-    }
+  valid_cols <- names(vars)[!low_vars]
+  dropped_cols <- names(vars)[low_vars]
+  
+  if (length(dropped_cols) > 0) {
+    message(sprintf("   [%s] Detected %d flat features. Isolating topographically...", label, length(dropped_cols)))
   }
   
-  # Compute Baseline
-  base_obj <- compute_universal_baseline(
-    mat = sub_mat,
+  sub_mat_valid <- sub_mat[, valid_cols, drop = FALSE]
+  
+  if (ncol(sub_mat_valid) < 2) {
+    message(sprintf("   [Skip] Macro-Group '%s' skipped (insufficient varying features).", label))
+    next
+  }
+  
+  # Compute Baseline ONLY on valid varying features
+  base_obj_raw <- compute_universal_baseline(
+    mat = sub_mat_valid,
     label = label,
     n_boot = if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100,
     seed = if(!is.null(config$stats$seed)) config$stats$seed else 123,
@@ -80,6 +85,31 @@ for (label in names(macro_groups)) {
     threshold_type = if(!is.null(config$stats$network_threshold_type)) config$stats$network_threshold_type else "percentile",
     threshold_value = if(!is.null(config$stats$network_edge_threshold)) config$stats$network_edge_threshold else 0.15
   )
+  
+  # Topological Padding: Rebuild full matrices with zeros for dropped features
+  all_features <- colnames(sub_mat)
+  p <- length(all_features)
+  
+  # Helper function to pad matrices
+  pad_matrix <- function(small_mat, full_names, default_val = 0) {
+    big_mat <- matrix(default_val, nrow = p, ncol = p, dimnames = list(full_names, full_names))
+    if (!is.null(small_mat) && nrow(small_mat) > 0) {
+      valid_n <- rownames(small_mat)
+      big_mat[valid_n, valid_n] <- small_mat
+    }
+    return(big_mat)
+  }
+  
+  base_obj <- list(
+    label = base_obj_raw$label,
+    mat = sub_mat, # Keep original matrix for reference
+    pcor = pad_matrix(base_obj_raw$pcor, all_features, 0),
+    raw_cor = pad_matrix(base_obj_raw$raw_cor, all_features, 0),
+    stability = pad_matrix(base_obj_raw$stability, all_features, 0),
+    adj_final = pad_matrix(base_obj_raw$adj_final, all_features, FALSE),
+    applied_threshold = base_obj_raw$applied_threshold
+  )
+  # End of Topological Padding substitution
   baselines[[label]] <- base_obj
   
   # Centralized Cytoscape Baseline Export (Only valid edges, inherently drops "weak" concepts)
@@ -216,30 +246,54 @@ for (scen in config$analysis_scenarios) {
     
     diff_edges <- net_res$edges_table %>% filter(Significant == TRUE & Edge_Category != "Weak")
     if (nrow(diff_edges) > 0) {
-      col_pcor_ctrl <- paste0("Pcor_", scen$control_label)
-      col_pcor_case <- paste0("Pcor_", scen$case_label)
+      
+      # 1. Export Edges (Clean format: only Differential Weight and exact Interaction)
       diff_net <- diff_edges %>%
         dplyr::select(Source = Node1, Target = Node2, Weight = Diff_Score,
-                      Pcor_Control = .data[[col_pcor_ctrl]], Pcor_Case = .data[[col_pcor_case]],
-                      Edge_Category, Significant, P_Value) %>%
-        dplyr::mutate(Interaction = Edge_Category)
+                      Significant, P_Value, Edge_Category) %>%
+        dplyr::rename(Interaction = Edge_Category)
       readr::write_csv(diff_net, file.path(cyto_dir, paste0(scen$id, "_diff_network.csv")))
+      
+      # 2. Export Nodes (Calculate topology strictly on the differential network structure)
+      diff_nodes <- unique(c(diff_edges$Node1, diff_edges$Node2))
+      
+      # Build unweighted adjacency matrix for the differential sub-network
+      adj_diff <- matrix(0, nrow = length(diff_nodes), ncol = length(diff_nodes), 
+                         dimnames = list(diff_nodes, diff_nodes))
+      
+      for(k in 1:nrow(diff_edges)) {
+        n1 <- diff_edges$Node1[k]
+        n2 <- diff_edges$Node2[k]
+        adj_diff[n1, n2] <- 1
+        adj_diff[n2, n1] <- 1
+      }
+      
+      # Calculate topology features for differential nodes
+      topo_diff <- calculate_node_topology(adj_diff)
+      
+      if (!is.null(topo_diff)) {
+        all_nodes <- topo_diff %>% 
+          dplyr::select(Node, Degree, Betweenness, Closeness, Eigen_Centrality)
+        
+        # Merge with sPLS-DA drivers if available
+        if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
+          drv_summ <- spls_drivers %>% 
+            dplyr::group_by(Marker) %>% 
+            dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
+            dplyr::ungroup() %>% 
+            dplyr::select(Marker, Importance, Direction) %>% 
+            dplyr::rename(PLSDA_Importance = Importance, PLSDA_Direction = Direction)
+          
+          all_nodes <- dplyr::left_join(all_nodes, drv_summ, by = c("Node" = "Marker"))
+        }
+        
+        # Safely handle NAs for nodes that are in the network but are not PLS-DA drivers
+        numeric_cols <- names(all_nodes)[sapply(all_nodes, is.numeric)]
+        all_nodes[numeric_cols] <- lapply(all_nodes[numeric_cols], function(x) replace(x, is.na(x), 0))
+        
+        readr::write_csv(all_nodes, file.path(cyto_dir, paste0(scen$id, "_node_attributes.csv")))
+      }
     }
-    
-    # Scenario-specific Node Attributes (Combines Topology + sPLS-DA Drivers)
-    all_nodes <- data.frame(Node = unique(c(net_res$edges_table$Node1, net_res$edges_table$Node2)), stringsAsFactors=F)
-    if(!is.null(topo_ctrl)) all_nodes <- left_join(all_nodes, topo_ctrl %>% select(Node, Degree, Betweenness) %>% rename(!!paste0("Degree_", scen$control_label) := Degree, !!paste0("Betweenness_", scen$control_label) := Betweenness), by="Node")
-    if(!is.null(topo_case)) all_nodes <- left_join(all_nodes, topo_case %>% select(Node, Degree, Betweenness) %>% rename(!!paste0("Degree_", scen$case_label) := Degree, !!paste0("Betweenness_", scen$case_label) := Betweenness), by="Node")
-    
-    if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
-      drv_summ <- spls_drivers %>% dplyr::group_by(Marker) %>% dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>%
-        dplyr::ungroup() %>% dplyr::select(Marker, Importance, Direction) %>% rename(PLSDA_Importance = Importance, PLSDA_Direction = Direction)
-      all_nodes <- left_join(all_nodes, drv_summ, by = c("Node" = "Marker"))
-    }
-    
-    numeric_cols <- names(all_nodes)[sapply(all_nodes, is.numeric)]
-    all_nodes[numeric_cols] <- lapply(all_nodes[numeric_cols], function(x) replace(x, is.na(x), 0))
-    readr::write_csv(all_nodes, file.path(cyto_dir, paste0(scen$id, "_node_attributes.csv")))
     
     # Append to Master Report
     net_sheet <- substr(paste0(scen$id, "_Net"), 1, 31)
