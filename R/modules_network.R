@@ -228,13 +228,35 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   n1 <- nrow(mat_ctrl)
   n_total <- nrow(pool_mat)
   
-  null_diffs <- foreach::foreach(i = 1:n_perm, .packages = "corpcor") %dopar% {
+  null_diffs_raw <- foreach::foreach(i = 1:n_perm, .packages = "corpcor") %dopar% {
     shuffled_idx <- sample(1:n_total)
-    p1 <- pool_mat[shuffled_idx[1:n1], ]
-    p2 <- pool_mat[shuffled_idx[(n1 + 1):n_total], ]
-    r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
-    r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
-    abs(r1 - r2)
+    p1 <- pool_mat[shuffled_idx[1:n1], , drop = FALSE]
+    p2 <- pool_mat[shuffled_idx[(n1 + 1):n_total], , drop = FALSE]
+    
+    # Safe guard against zero variance in random resamples
+    var1 <- apply(p1, 2, var, na.rm = TRUE)
+    var2 <- apply(p2, 2, var, na.rm = TRUE)
+    
+    if (any(var1 == 0 | is.na(var1)) || any(var2 == 0 | is.na(var2))) {
+      return(NULL)
+    }
+    
+    tryCatch({
+      r1 <- infer_network_pcor(p1, fixed_lambda = NULL)
+      r2 <- infer_network_pcor(p2, fixed_lambda = NULL)
+      return(abs(r1 - r2))
+    }, error = function(e) return(NULL))
+  }
+  
+  # Filter out failed permutations to prevent sapply crash
+  null_diffs <- Filter(Negate(is.null), null_diffs_raw)
+  n_valid_perms <- length(null_diffs)
+  
+  if (n_valid_perms < (n_perm * 0.8)) {
+    warning(sprintf("      [DiffNet] High invariant resample rate. %d/%d valid permutations used.", n_valid_perms, n_perm))
+  }
+  if (n_valid_perms == 0) {
+    stop("      [DiffNet] All permutations failed due to zero variance.")
   }
   
   # 2. STATS & P-VALUES
@@ -243,7 +265,8 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   edges_idx <- which(upper.tri(stable_mask) & stable_mask, arr.ind = TRUE)
   
   results_list <- list()
-  denom <- n_perm + 1
+  # Dynamically adjust denominator based on successful permutations
+  denom <- n_valid_perms + 1
   
   for(k in 1:nrow(edges_idx)) {
     i <- edges_idx[k,1]
@@ -357,8 +380,9 @@ calculate_node_topology <- function(adj_mat) {
 #' 
 #' @param adj_ctrl Adjacency matrix (0/1) for Control.
 #' @param adj_case Adjacency matrix (0/1) for Case.
+#' @param thresholds Vector of thresholds (lower buond, upper buond)
 #' @return Dataframe with Jaccard index per node.
-calculate_jaccard_rewiring <- function(adj_ctrl, adj_case) {
+calculate_jaccard_rewiring <- function(adj_ctrl, adj_case, thresholds = c(0.3, 0.7)) {
   
   # Ensure node alignment
   nodes <- intersect(rownames(adj_ctrl), rownames(adj_case))
@@ -401,7 +425,7 @@ calculate_jaccard_rewiring <- function(adj_ctrl, adj_case) {
   
   # Add interpretation
   res_df$Rewiring_Status <- cut(res_df$Jaccard_Index, 
-                                breaks = c(-Inf, 0.3, 0.7, Inf), 
+                                breaks = c(-Inf, thresholds[1], thresholds[2], Inf), 
                                 labels = c("High_Rewiring", "Moderate", "Stable"))
   
   return(res_df)

@@ -719,7 +719,8 @@ viz_plot_splsda_heatmap <- function(mat_z, metadata, group_col, colors, title = 
 #' @param colors_viz Named vector of colors for groups.
 #' @param out_path Path to save the PDF.
 #' @param group_col The name of the metadata column to use for grouping/coloring (default: "Group").
-viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path, group_col = "Group") {
+#' @param n_top_boxplots Number of boxplots to plot. 
+viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_path, group_col = "Group", n_top_boxplots = 9) {
   
   if (is.null(pls_res$model)) return(NULL)
   
@@ -823,7 +824,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
           group_factor = plot_group_factor,
           loadings_df = df_comp, 
           comp = i, 
-          n_top = 9, 
+          n_top = n_top_boxplots, 
           colors = plot_colors
         )
         if (!is.null(p_box)) print(p_box)

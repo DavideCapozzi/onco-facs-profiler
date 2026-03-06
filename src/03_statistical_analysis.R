@@ -119,13 +119,16 @@ if (config$multivariate$run_plsda) {
     addWorksheet(wb_master, "Global_sPLSDA_Drivers")
     writeData(wb_master, "Global_sPLSDA_Drivers", top_drivers)
     
+    n_boxes <- if(!is.null(config$multivariate$top_n_loadings)) config$multivariate$top_n_loadings else 9
+    
     viz_report_plsda(
       pls_res = pls_res, 
       drivers_df = top_drivers, 
       metadata_viz = meta_stats_global, 
       colors_viz = current_palette,  
       out_path = file.path(global_dir, "Global_sPLSDA_Results.pdf"),
-      group_col = "Group" 
+      group_col = "Group", 
+      n_top_boxplots = n_boxes
     )
   }, error = function(e) message(paste("   [ERROR] Stratified sPLS-DA Failed:", e$message)))
 }
