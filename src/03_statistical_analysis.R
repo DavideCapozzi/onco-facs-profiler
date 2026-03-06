@@ -86,9 +86,10 @@ perm_global <- test_coda_permanova(
 addWorksheet(wb_master, "Global_PERMANOVA")
 writeData(wb_master, "Global_PERMANOVA", as.data.frame(perm_global), rowNames = TRUE)
 
-# 2.2 Global Dispersion
+# 2.2 Global Dispersion & All-Pairs Contrasts
 message("   [Stats] Running Global Dispersion Check...")
 tryCatch({
+  # 1. Global Dispersion Test (all groups together)
   disp_global <- test_coda_dispersion(
     data_input = df_stats_global[, c("Group", safe_markers)], 
     group_col = "Group", 
@@ -100,6 +101,22 @@ tryCatch({
   }
   addWorksheet(wb_master, "Global_Dispersion")
   writeData(wb_master, "Global_Dispersion", disp_global$anova_table, rowNames = TRUE)
+  
+  # 2. Pairwise Dispersion Test (all combinations)
+  message("   [Stats] Running All-Pairs Dispersion Check...")
+  disp_pairwise <- run_pairwise_betadisper(
+    data_input = df_stats_global[, c("Group", safe_markers)], 
+    group_col = "Group", 
+    metadata_cols = c("Patient_ID"),
+    n_perm = config$stats$n_perm,
+    min_n = if(!is.null(config$stats$min_sample_size)) config$stats$min_sample_size else 4
+  )
+  
+  if (!is.null(disp_pairwise) && nrow(disp_pairwise) > 0) {
+    addWorksheet(wb_master, "All_Pairs_Dispersion")
+    writeData(wb_master, "All_Pairs_Dispersion", disp_pairwise)
+  }
+  
 }, error = function(e) message(paste("   [ERROR] Beta-Dispersion failed:", e$message)))
 
 # 2.3 Global sPLS-DA (Multiclass)
