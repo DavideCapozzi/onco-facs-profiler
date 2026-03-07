@@ -314,10 +314,51 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   
   res_df <- do.call(rbind, results_list)
   res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
-  res_df$Significant <- res_df$P_Value < pvalue_thresh
+  
+  # --- BIOLOGICAL PLAUSIBILITY FILTER & DYNAMIC CATEGORY ASSIGNMENT ---
+  # To avoid Type I errors without FDR, enforce that Partial Correlation (Shrinkage)
+  # must be supported by marginal Pearson Correlation (same sign and minimum absolute strength).
+  min_marginal_cor <- 0.10
   
   res_df <- res_df %>%
-    dplyr::arrange(factor(Edge_Category, levels = c("Inverted", "Specific", "Conserved", "Weak")), P_Value)
+    dplyr::mutate(
+      # 1. Check Concordance for Control Group
+      Concordance_Ctrl = (sign(Weight_Ctrl) == sign(Cor_Ctrl)) & (abs(Cor_Ctrl) >= min_marginal_cor),
+      
+      # 2. Check Concordance for Case Group
+      Concordance_Case = (sign(Weight_Case) == sign(Cor_Case)) & (abs(Cor_Case) >= min_marginal_cor),
+      
+      # 3. Define Plausibility based on ORIGINAL Edge_Category
+      Biological_Plausibility = dplyr::case_when(
+        Edge_Category == "Conserved" ~ Concordance_Ctrl | Concordance_Case,
+        Edge_Category == "Specific" & Is_Valid_Ctrl ~ Concordance_Ctrl,
+        Edge_Category == "Specific" & Is_Valid_Case ~ Concordance_Case,
+        Edge_Category == "Inverted" ~ Concordance_Ctrl & Concordance_Case,
+        TRUE ~ FALSE # Weak edges are never plausible
+      ),
+      
+      # 4. Final Significance Logic (P-Value + Plausibility)
+      Significant = (P_Value < pvalue_thresh) & Biological_Plausibility,
+      
+      # 5. Overwrite Edge_Category with precise dynamic labels
+      Edge_Category = dplyr::case_when(
+        Edge_Category == "Specific" & Is_Valid_Ctrl ~ paste0("Specific_", label_ctrl),
+        Edge_Category == "Specific" & Is_Valid_Case ~ paste0("Specific_", label_case),
+        TRUE ~ Edge_Category
+      )
+    )
+  
+  # Order the output for readability using dynamic factor levels
+  dynamic_levels <- c(
+    "Inverted", 
+    paste0("Specific_", label_case), 
+    paste0("Specific_", label_ctrl), 
+    "Conserved", 
+    "Weak"
+  )
+  
+  res_df <- res_df %>%
+    dplyr::arrange(factor(Edge_Category, levels = dynamic_levels), P_Value)
   
   colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Pcor_", label_ctrl)
   colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Pcor_", label_case)
