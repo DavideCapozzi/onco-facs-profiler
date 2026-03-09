@@ -2,7 +2,7 @@
 # ==============================================================================
 # STEP 03: STATISTICAL ANALYSIS & SCENARIO ORCHESTRATION
 # Description: Global Hypothesis testing (PERMANOVA, sPLS-DA) and 
-#              Iterative Multi-Scenario execution. Replaces old workflows.R.
+#              Iterative Multi-Scenario execution via workflows module.
 # ==============================================================================
 
 suppressPackageStartupMessages({
@@ -16,6 +16,7 @@ source("R/utils_io.R")
 source("R/modules_hypothesis.R") 
 source("R/modules_multivariate.R")
 source("R/modules_viz.R") 
+source("R/workflows.R") # Injected Orchestrator Macros
 
 message("\n=== PIPELINE STEP 3: STATISTICAL ANALYSIS & SCENARIOS ===")
 
@@ -178,117 +179,42 @@ if (is.null(config$analysis_scenarios) || length(config$analysis_scenarios) == 0
     if (!dir.exists(scen_dir)) dir.create(scen_dir, recursive = TRUE)
     
     tryCatch({
-      # 3.1 Data Subsetting
-      target_groups <- unlist(c(scenario$case_groups, scenario$control_groups))
+      # Delegate processing to module logic ensuring pure functions and clean I/O
+      scen_res <- run_scenario_pipeline(
+        scenario = scenario, 
+        full_mat = full_mat, 
+        full_meta = full_meta, 
+        config = config, 
+        out_dir = scen_dir
+      )
       
-      sub_meta <- full_meta %>% 
-        dplyr::filter(Group %in% target_groups) %>% 
-        dplyr::mutate(Analysis_Group = ifelse(Group %in% unlist(scenario$case_groups), 
-                                              scenario$case_label, 
-                                              scenario$control_label)) %>% 
-        dplyr::mutate(Analysis_Group = factor(Analysis_Group, 
-                                              levels = c(scenario$control_label, scenario$case_label)))
-      
-      sub_mat <- full_mat[sub_meta$Patient_ID, , drop = FALSE]
-      
-      if (nrow(sub_mat) == 0) {
-        message("      [Skip] No samples found after filtering.")
-        next
-      }
-      
-      counts <- table(sub_meta$Analysis_Group)
-      message(sprintf("      [Info] Samples: %s=%d vs %s=%d", 
-                      names(counts)[1], counts[1], names(counts)[2], counts[2]))
-      
-      # 3.2 Zero-Variance Filtering (Universal Space Protection)
-      var_thresh <- if(!is.null(config$stats$min_variance)) config$stats$min_variance else 1e-6
-      vars <- apply(sub_mat, 2, var, na.rm = TRUE)
-      low_vars <- vars < var_thresh | is.na(vars)
-      
-      if (sum(low_vars) > 0) {
-        dropped_names <- names(vars)[low_vars]
-        message(sprintf("      [Prep] Dropping %d flat features with zero pooled variance: %s", 
-                        sum(low_vars), paste(dropped_names, collapse = ", ")))
-        sub_mat <- sub_mat[, !low_vars, drop = FALSE]
+      if (!is.null(scen_res)) {
+        # Securely write valid outputs to Master Workbook
         
-        if (ncol(sub_mat) < 2) {
-          message("      [Skip] Less than 2 features remaining after variance filter.")
-          next
+        # Dispersion Output
+        if (!is.null(scen_res$dispersion)) {
+          disp_sheet <- substr(paste0(scenario$id, "_Disp"), 1, 31)
+          addWorksheet(wb_master, disp_sheet)
+          writeData(wb_master, disp_sheet, scen_res$dispersion, rowNames = TRUE)
         }
-      }
-      
-      # 3.3 PERMANOVA
-      perm_res <- NULL
-      tryCatch({
-        sub_data_input <- cbind(sub_meta, as.data.frame(sub_mat))
-        perm_obj <- test_coda_permanova(
-          sub_data_input, 
-          group_col = "Analysis_Group", 
-          metadata_cols = colnames(sub_meta),
-          n_perm = if(!is.null(config$stats$n_perm)) config$stats$n_perm else 999
-        )
-        perm_res <- as.data.frame(perm_obj)
         
-        sheet_name <- substr(paste0(scenario$id, "_Perm"), 1, 31)
-        addWorksheet(wb_master, sheet_name)
-        writeData(wb_master, sheet_name, perm_res, rowNames = TRUE)
-      }, error = function(e) message(sprintf("      [Fail] PERMANOVA failed: %s", e$message)))
-      
-      # 3.4 sPLS-DA
-      spls_drivers <- NULL
-      valid_levels <- names(counts)[counts > 0]
-      
-      if (length(valid_levels) >= 2 && min(counts[valid_levels]) >= 2) {
-        tryCatch({
-          n_comp <- if(!is.null(config$multivariate$n_comp)) config$multivariate$n_comp else 2
-          cv_folds <- if(!is.null(config$multivariate$validation_folds)) config$multivariate$validation_folds else 5
-          actual_folds <- min(cv_folds, min(counts[valid_levels]))
-          if (actual_folds < 2) actual_folds <- 2
-          
-          spls_res <- run_splsda_model(
-            data_z = sub_mat,
-            metadata = sub_meta, 
-            group_col = "Analysis_Group", 
-            n_comp = n_comp, 
-            folds = actual_folds, 
-            n_repeat = if(!is.null(config$multivariate$n_repeat_cv)) config$multivariate$n_repeat_cv else 10
-          )
-          
-          spls_drivers <- extract_plsda_loadings(spls_res)
-          
-          if (nrow(spls_drivers) > 0) {
-            
-            # 1. Visualization (Must run BEFORE renaming columns)
-            scen_palette <- c()
-            scen_palette[scenario$control_label] <- config$colors$control
-            scen_palette[scenario$case_label] <- if(length(config$colors$cases) > 0) config$colors$cases[[1]] else "firebrick"
-            
-            viz_report_plsda(
-              pls_res = spls_res, 
-              drivers_df = spls_drivers, 
-              metadata_viz = sub_meta, 
-              colors_viz = scen_palette, 
-              out_path = file.path(scen_dir, paste0(scenario$id, "_Plot_sPLSDA.pdf")),
-              group_col = "Analysis_Group"
-            )
-            
-            # 2. Dynamic Renaming for Excel Export
-            contrast_lbl <- paste0(scenario$case_label, "_VS_", scenario$control_label)
-            spls_drivers <- spls_drivers %>% 
-              dplyr::rename_with(.fn = ~ paste0("Weight_", contrast_lbl, "_PC1"), .cols = dplyr::matches("^Comp1_Weight$")) %>%
-              dplyr::rename_with(.fn = ~ paste0("Weight_", contrast_lbl, "_PC2"), .cols = dplyr::matches("^Comp2_Weight$"))
-            
-            sheet_name <- substr(paste0(scenario$id, "_Drv"), 1, 31)
-            addWorksheet(wb_master, sheet_name)
-            writeData(wb_master, sheet_name, spls_drivers)
-          }
-        }, error = function(e) message(sprintf("      [Fail] sPLS-DA failed: %s", e$message)))
-      } else {
-        message("      [Skip] sPLS-DA skipped: Class size too small for CV (<2).")
+        # PERMANOVA Output
+        if (!is.null(scen_res$permanova)) {
+          perm_sheet <- substr(paste0(scenario$id, "_Perm"), 1, 31)
+          addWorksheet(wb_master, perm_sheet)
+          writeData(wb_master, perm_sheet, scen_res$permanova, rowNames = TRUE)
+        }
+        
+        # Drivers (sPLS-DA) Output
+        if (!is.null(scen_res$drivers) && nrow(scen_res$drivers) > 0) {
+          drv_sheet <- substr(paste0(scenario$id, "_Drv"), 1, 31)
+          addWorksheet(wb_master, drv_sheet)
+          writeData(wb_master, drv_sheet, scen_res$drivers)
+        }
+        
+        # Collect for Consolidated Reporting
+        all_results[[scenario$id]] <- list(id = scenario$id, drivers = scen_res$drivers)
       }
-      
-      # Collect for Consolidation
-      all_results[[scenario$id]] <- list(id = scenario$id, drivers = spls_drivers)
       
     }, error = function(e) {
       message(sprintf("!!! [Error] Scenario '%s' failed: %s", scenario$id, e$message))
@@ -319,7 +245,6 @@ if (is.null(config$analysis_scenarios) || length(config$analysis_scenarios) == 0
     combined_drivers <- dplyr::bind_rows(combined_drivers_list)
     
     if (nrow(combined_drivers) > 0) {
-      # Add sheet without the invalid 'before' argument
       addWorksheet(wb_master, "All_Drivers_Summary")
       writeData(wb_master, "All_Drivers_Summary", combined_drivers)
       
