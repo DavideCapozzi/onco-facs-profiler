@@ -148,7 +148,7 @@ compute_universal_baseline <- function(mat, label = "Group", n_boot = 100, seed 
   
   # 2. PCOR & MAGNITUDE THRESHOLDING
   obs_pcor <- infer_network_pcor(mat, fixed_lambda = NULL)
-  raw_cor <- cor(mat, use = "pairwise.complete.obs")
+  raw_cor <- suppressWarnings(cor(mat, method = "spearman", use = "pairwise.complete.obs"))
   
   if (threshold_value == 0) {
     actual_thresh <- 0
@@ -177,18 +177,20 @@ compute_universal_baseline <- function(mat, label = "Group", n_boot = 100, seed 
   ))
 }
 
-#' @title Compute Differential Overlay
+#' @title Compute Differential Overlay (Stability-Driven with Spearman Annotation)
 #' @description 
 #' Performs Permutation Testing leveraging pre-calculated Universal Baselines.
-#' Bypasses redundant bootstrapping entirely.
+#' Bypasses redundant bootstrapping. Implements a Stability-Driven filtering 
+#' approach, decoupling edge existence (Bootstrap stability + Delta Pcor) 
+#' from biological interpretation (Spearman Rank Annotation).
 #' 
 #' @param base_ctrl Pre-calculated baseline object for the control group.
 #' @param base_case Pre-calculated baseline object for the case group.
 #' @param n_perm Number of permutations.
 #' @param seed Random seed.
 #' @param n_cores Number of cores.
-#' @param pvalue_thresh Alpha threshold for differential significance.
-#' @param min_marginal_cor Minimum marginal correlation absolute value required for biological plausibility.
+#' @param pvalue_thresh Alpha threshold (Retained for continuous annotation).
+#' @param min_marginal_cor Used as the threshold for Delta Pcor and Spearman magnitude.
 #' @return List with structured edge table and network topologies.
 compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, seed = 123, n_cores = 1, pvalue_thresh = 0.05, min_marginal_cor = 0.10) {
   requireNamespace("parallel", quietly = TRUE)
@@ -224,7 +226,7 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   parallel::clusterExport(cl, varlist = c("infer_network_pcor"), envir = environment())
   parallel::clusterSetRNGStream(cl, seed)
   
-  # 1. PERMUTATION TEST
+  # 1. PERMUTATION TEST (Generates Empirical Null Distribution)
   pool_mat <- rbind(mat_ctrl, mat_case)
   n1 <- nrow(mat_ctrl)
   n_total <- nrow(pool_mat)
@@ -234,7 +236,6 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
     p1 <- pool_mat[shuffled_idx[1:n1], , drop = FALSE]
     p2 <- pool_mat[shuffled_idx[(n1 + 1):n_total], , drop = FALSE]
     
-    # Safe guard against zero variance in random resamples
     var1 <- apply(p1, 2, var, na.rm = TRUE)
     var2 <- apply(p2, 2, var, na.rm = TRUE)
     
@@ -249,7 +250,6 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
     }, error = function(e) return(NULL))
   }
   
-  # Filter out failed permutations to prevent sapply crash
   null_diffs <- Filter(Negate(is.null), null_diffs_raw)
   n_valid_perms <- length(null_diffs)
   
@@ -260,13 +260,12 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
     stop("      [DiffNet] All permutations failed due to zero variance.")
   }
   
-  # 2. STATS & P-VALUES
+  # 2. STATS & RAW DATA AGGREGATION
   obs_diff <- abs(base_ctrl$pcor - base_case$pcor)
   nodes <- colnames(mat_ctrl)
   edges_idx <- which(upper.tri(stable_mask) & stable_mask, arr.ind = TRUE)
   
   results_list <- list()
-  # Dynamically adjust denominator based on successful permutations
   denom <- n_valid_perms + 1
   
   for(k in 1:nrow(edges_idx)) {
@@ -276,9 +275,6 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
     obs_val <- obs_diff[i,j]
     null_vals <- sapply(null_diffs, function(m) m[i, j])
     p_val <- (sum(null_vals >= obs_val) + 1) / denom
-    
-    test_ctrl <- tryCatch(suppressWarnings(cor.test(mat_ctrl[,i], mat_ctrl[,j], method = "pearson")), error = function(e) list(p.value = NA))
-    test_case <- tryCatch(suppressWarnings(cor.test(mat_case[,i], mat_case[,j], method = "pearson")), error = function(e) list(p.value = NA))
     
     is_valid_ctrl <- base_ctrl$adj_final[i,j]
     is_valid_case <- base_case$adj_final[i,j]
@@ -296,11 +292,9 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
     results_list[[k]] <- data.frame(
       Node1 = nodes[i],
       Node2 = nodes[j],
-      Pval_Cor_Ctrl = test_ctrl$p.value,
-      Cor_Ctrl = base_ctrl$raw_cor[i,j],
+      Cor_Ctrl = base_ctrl$raw_cor[i,j], # Now strictly Spearman from baseline
       Weight_Ctrl = base_ctrl$pcor[i,j],
-      Pval_Cor_Case = test_case$p.value,
-      Cor_Case = base_case$raw_cor[i,j],
+      Cor_Case = base_case$raw_cor[i,j], # Now strictly Spearman from baseline
       Weight_Case = base_case$pcor[i,j],
       Is_Stable_Ctrl = base_ctrl$stability[i,j] == 1,
       Is_Stable_Case = base_case$stability[i,j] == 1,
@@ -316,31 +310,30 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   res_df <- do.call(rbind, results_list)
   res_df$FDR <- stats::p.adjust(res_df$P_Value, method = "BH")
   
-  # --- BIOLOGICAL PLAUSIBILITY FILTER & DYNAMIC CATEGORY ASSIGNMENT ---
-  # To avoid Type I errors without FDR, enforce that Partial Correlation (Shrinkage)
-  # must be supported by marginal Pearson Correlation (same sign and minimum absolute strength).
-  
+  # 3. STABILITY-DRIVEN FILTERING & SPEARMAN ANNOTATION PIPELINE
   res_df <- res_df %>%
     dplyr::mutate(
-      # 1. Check Concordance for Control Group
+      # Mechanism Annotation: Compare Pcor with Spearman (Rank)
       Concordance_Ctrl = (sign(Weight_Ctrl) == sign(Cor_Ctrl)) & (abs(Cor_Ctrl) >= min_marginal_cor),
-      
-      # 2. Check Concordance for Case Group
       Concordance_Case = (sign(Weight_Case) == sign(Cor_Case)) & (abs(Cor_Case) >= min_marginal_cor),
       
-      # 3. Define Plausibility based on ORIGINAL Edge_Category
-      Biological_Plausibility = dplyr::case_when(
-        Edge_Category == "Conserved" ~ Concordance_Ctrl | Concordance_Case,
-        Edge_Category == "Specific" & Is_Valid_Ctrl ~ Concordance_Ctrl,
-        Edge_Category == "Specific" & Is_Valid_Case ~ Concordance_Case,
-        Edge_Category == "Inverted" ~ Concordance_Ctrl & Concordance_Case,
-        TRUE ~ FALSE # Weak edges are never plausible
+      Mechanism_Ctrl = dplyr::case_when(
+        Is_Valid_Ctrl & Concordance_Ctrl ~ "Direct",
+        Is_Valid_Ctrl & !Concordance_Ctrl ~ "Masked/Suppressor",
+        TRUE ~ "None"
       ),
       
-      # 4. Final Significance Logic (P-Value + Plausibility)
-      Significant = (P_Value < pvalue_thresh) & Biological_Plausibility,
+      Mechanism_Case = dplyr::case_when(
+        Is_Valid_Case & Concordance_Case ~ "Direct",
+        Is_Valid_Case & !Concordance_Case ~ "Masked/Suppressor",
+        TRUE ~ "None"
+      ),
       
-      # 5. Overwrite Edge_Category with precise dynamic labels
+      # Core Filtering Rule: Existence relies on Topological Stability AND Delta Magnitude.
+      # Bypassing P-value/FDR constraints for structural existence to protect against small N power drop.
+      Significant = (Is_Valid_Ctrl | Is_Valid_Case) & (Diff_Score >= min_marginal_cor),
+      
+      # Overwrite Edge_Category with precise dynamic labels for specific edges
       Edge_Category = dplyr::case_when(
         Edge_Category == "Specific" & Is_Valid_Ctrl ~ paste0("Specific_", label_ctrl),
         Edge_Category == "Specific" & Is_Valid_Case ~ paste0("Specific_", label_case),
@@ -348,7 +341,7 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
       )
     )
   
-  # Order the output for readability using dynamic factor levels
+  # Order the output for readability
   dynamic_levels <- c(
     "Inverted", 
     paste0("Specific_", label_case), 
@@ -358,18 +351,19 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   )
   
   res_df <- res_df %>%
-    dplyr::arrange(factor(Edge_Category, levels = dynamic_levels), P_Value)
+    dplyr::arrange(factor(Edge_Category, levels = dynamic_levels), desc(Diff_Score))
   
+  # Rename columns dynamically based on labels
   colnames(res_df)[colnames(res_df) == "Weight_Ctrl"] <- paste0("Pcor_", label_ctrl)
   colnames(res_df)[colnames(res_df) == "Weight_Case"] <- paste0("Pcor_", label_case)
-  colnames(res_df)[colnames(res_df) == "Cor_Ctrl"] <- paste0("Cor_", label_ctrl)
-  colnames(res_df)[colnames(res_df) == "Cor_Case"] <- paste0("Cor_", label_case)
-  colnames(res_df)[colnames(res_df) == "Pval_Cor_Ctrl"] <- paste0("Pval_Cor_", label_ctrl)
-  colnames(res_df)[colnames(res_df) == "Pval_Cor_Case"] <- paste0("Pval_Cor_", label_case)
+  colnames(res_df)[colnames(res_df) == "Cor_Ctrl"] <- paste0("Spearman_", label_ctrl)
+  colnames(res_df)[colnames(res_df) == "Cor_Case"] <- paste0("Spearman_", label_case)
   colnames(res_df)[colnames(res_df) == "Is_Stable_Ctrl"] <- paste0("Is_Stable_", label_ctrl)
   colnames(res_df)[colnames(res_df) == "Is_Stable_Case"] <- paste0("Is_Stable_", label_case)
   colnames(res_df)[colnames(res_df) == "Is_Valid_Ctrl"] <- paste0("Is_Valid_", label_ctrl)
   colnames(res_df)[colnames(res_df) == "Is_Valid_Case"] <- paste0("Is_Valid_", label_case)
+  colnames(res_df)[colnames(res_df) == "Mechanism_Ctrl"] <- paste0("Mech_", label_ctrl)
+  colnames(res_df)[colnames(res_df) == "Mechanism_Case"] <- paste0("Mech_", label_case)
   
   return(list(
     edges_table = res_df,

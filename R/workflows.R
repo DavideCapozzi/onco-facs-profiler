@@ -217,7 +217,18 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   diff_edges <- net_res$edges_table %>% dplyr::filter(Significant == TRUE & Edge_Category != "Weak")
   if (nrow(diff_edges) > 0) {
     diff_net <- diff_edges %>%
-      dplyr::select(Source = Node1, Target = Node2, Weight = Diff_Score, Significant, P_Value, Edge_Category) %>%
+      dplyr::select(
+        Source = Node1, 
+        Target = Node2, 
+        Weight = Diff_Score, 
+        Significant, 
+        P_Value, 
+        FDR, 
+        Edge_Category,
+        dplyr::starts_with("Pcor_"),
+        dplyr::starts_with("Spearman_"),
+        dplyr::starts_with("Mech_")
+      ) %>%
       dplyr::rename(Interaction = Edge_Category)
     readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))
     
