@@ -169,7 +169,8 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
     n_perm = if(!is.null(config$stats$n_perm)) config$stats$n_perm else 1000,
     seed = if(!is.null(config$stats$seed)) config$stats$seed else 123,
     n_cores = if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1,
-    pvalue_thresh = if(!is.null(config$stats$pvalue_threshold)) config$stats$pvalue_threshold else 0.05
+    pvalue_thresh = if(!is.null(config$stats$pvalue_threshold)) config$stats$pvalue_threshold else 0.05,
+    min_marginal_cor = if(!is.null(config$stats$min_marginal_cor)) config$stats$min_marginal_cor else 0.10
   )
   
   if (is.null(net_res) || nrow(net_res$edges_table) == 0) {

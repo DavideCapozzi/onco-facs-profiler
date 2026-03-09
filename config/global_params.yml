@@ -205,6 +205,7 @@ stats:
   pvalue_threshold: 0.05
   network_threshold_type: "absolute"
   network_edge_threshold: 0.1
+  min_marginal_cor: 0.10
   n_cores: "auto"
 
 EOF: TRUE

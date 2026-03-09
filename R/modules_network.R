@@ -188,8 +188,9 @@ compute_universal_baseline <- function(mat, label = "Group", n_boot = 100, seed 
 #' @param seed Random seed.
 #' @param n_cores Number of cores.
 #' @param pvalue_thresh Alpha threshold for differential significance.
+#' @param min_marginal_cor Minimum marginal correlation absolute value required for biological plausibility.
 #' @return List with structured edge table and network topologies.
-compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, seed = 123, n_cores = 1, pvalue_thresh = 0.05) {
+compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, seed = 123, n_cores = 1, pvalue_thresh = 0.05, min_marginal_cor = 0.10) {
   requireNamespace("parallel", quietly = TRUE)
   requireNamespace("doParallel", quietly = TRUE)
   requireNamespace("foreach", quietly = TRUE)
@@ -318,7 +319,6 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
   # --- BIOLOGICAL PLAUSIBILITY FILTER & DYNAMIC CATEGORY ASSIGNMENT ---
   # To avoid Type I errors without FDR, enforce that Partial Correlation (Shrinkage)
   # must be supported by marginal Pearson Correlation (same sign and minimum absolute strength).
-  min_marginal_cor <- 0.10
   
   res_df <- res_df %>%
     dplyr::mutate(
