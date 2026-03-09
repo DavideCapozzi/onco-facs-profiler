@@ -143,3 +143,118 @@ run_scenario_pipeline <- function(scenario, full_mat, full_meta, config, out_dir
   
   return(res_list)
 }
+
+#' @title Execute Network Pipeline for a Single Scenario
+#' @description 
+#' Orchestrates differential network computation, topology calculation, 
+#' visualization (Hub-Driver, Density, Networks), and Cytoscape export.
+#' 
+#' @param scenario List containing scenario definitions.
+#' @param base_ctrl Universal baseline object for control group.
+#' @param base_case Universal baseline object for case group.
+#' @param config Global configuration list.
+#' @param out_dir Directory to save scenario-specific artifacts.
+#' @param spls_drivers Dataframe of sPLS-DA drivers from Step 03 payload (optional).
+#' @return A list containing edge tables and significant edge IDs.
+run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config, out_dir, spls_drivers = NULL) {
+  
+  message(sprintf("\n   [Scenario] Processing Network: %s...", scenario$id))
+  
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  
+  # 1. Differential Overlay
+  net_res <- compute_differential_overlay(
+    base_ctrl = base_ctrl,
+    base_case = base_case,
+    n_perm = if(!is.null(config$stats$n_perm)) config$stats$n_perm else 1000,
+    seed = if(!is.null(config$stats$seed)) config$stats$seed else 123,
+    n_cores = if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1,
+    pvalue_thresh = if(!is.null(config$stats$pvalue_threshold)) config$stats$pvalue_threshold else 0.05
+  )
+  
+  if (is.null(net_res) || nrow(net_res$edges_table) == 0) {
+    message("      [Skip] No differential edges computed.")
+    return(NULL)
+  }
+  
+  # Save Raw RDS for the scenario
+  saveRDS(net_res, file.path(out_dir, paste0(scenario$id, "_Differential_Network.rds")))
+  
+  # 2. Topology Calculation
+  topo_ctrl <- if (sum(net_res$adj_final$ctrl)>0) calculate_node_topology(net_res$adj_final$ctrl) else NULL
+  topo_case <- if (sum(net_res$adj_final$case)>0) calculate_node_topology(net_res$adj_final$case) else NULL
+  
+  # 3. Visualizations (PDFs)
+  if (!is.null(spls_drivers) && nrow(spls_drivers) > 0 && (!is.null(topo_ctrl) || !is.null(topo_case))) {
+    pdf(file.path(out_dir, paste0(scenario$id, "_Hub_Driver_Report.pdf")), width = 11, height = 8)
+    if(!is.null(topo_ctrl)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_ctrl, "Degree"), "Degree", paste("\nNetwork:", scenario$control_label)))
+    if(!is.null(topo_case)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_case, "Degree"), "Degree", paste("\nNetwork:", scenario$case_label)))
+    if(!is.null(topo_ctrl)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_ctrl, "Betweenness"), "Betweenness", paste("\nNetwork:", scenario$control_label)))
+    if(!is.null(topo_case)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_case, "Betweenness"), "Betweenness", paste("\nNetwork:", scenario$case_label)))
+    dev.off()
+  }
+  
+  thresh_to_plot <- net_res$applied_threshold
+  pdf(file.path(out_dir, paste0(scenario$id, "_Edge_Distribution.pdf")), width = 8, height = 6)
+  if(sum(abs(net_res$networks$ctrl) > 0) > 0) {
+    print(viz_plot_edge_density(net_res$networks$ctrl, adj_mat = net_res$adj_final$ctrl, threshold = thresh_to_plot, group_label = scenario$control_label))
+  }
+  if(sum(abs(net_res$networks$case) > 0) > 0) {
+    print(viz_plot_edge_density(net_res$networks$case, adj_mat = net_res$adj_final$case, threshold = thresh_to_plot, group_label = scenario$case_label))
+  }
+  dev.off()
+  
+  pdf(file.path(out_dir, paste0(scenario$id, "_Plot_Networks.pdf")), width = 12, height = 6)
+  if(!is.null(topo_ctrl)) print(plot_network_structure(net_res$adj_final$ctrl, net_res$networks$ctrl, title = paste("Control:", scenario$control_label), min_cor = 0))
+  if(!is.null(topo_case)) print(plot_network_structure(net_res$adj_final$case, net_res$networks$case, title = paste("Case:", scenario$case_label), min_cor = 0))
+  dev.off()
+  
+  # 4. Cytoscape Export
+  cyto_dir <- file.path(out_dir, "cytoscape_export")
+  if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
+  
+  diff_edges <- net_res$edges_table %>% dplyr::filter(Significant == TRUE & Edge_Category != "Weak")
+  if (nrow(diff_edges) > 0) {
+    diff_net <- diff_edges %>%
+      dplyr::select(Source = Node1, Target = Node2, Weight = Diff_Score, Significant, P_Value, Edge_Category) %>%
+      dplyr::rename(Interaction = Edge_Category)
+    readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))
+    
+    diff_nodes <- unique(c(diff_edges$Node1, diff_edges$Node2))
+    adj_diff <- matrix(0, nrow = length(diff_nodes), ncol = length(diff_nodes), dimnames = list(diff_nodes, diff_nodes))
+    for(k in 1:nrow(diff_edges)) {
+      adj_diff[diff_edges$Node1[k], diff_edges$Node2[k]] <- 1
+      adj_diff[diff_edges$Node2[k], diff_edges$Node1[k]] <- 1
+    }
+    
+    topo_diff <- calculate_node_topology(adj_diff)
+    if (!is.null(topo_diff)) {
+      all_nodes <- topo_diff %>% dplyr::select(Node, Degree, Betweenness, Closeness, Eigen_Centrality)
+      if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
+        drv_summ <- spls_drivers %>% dplyr::group_by(Marker) %>% dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>% dplyr::ungroup()
+        all_nodes <- dplyr::left_join(all_nodes, drv_summ[, c("Marker", "Importance", "Direction")], by = c("Node" = "Marker"))
+      }
+      num_cols <- names(all_nodes)[sapply(all_nodes, is.numeric)]
+      all_nodes[num_cols] <- lapply(all_nodes[num_cols], function(x) replace(x, is.na(x), 0))
+      readr::write_csv(all_nodes, file.path(cyto_dir, paste0(scenario$id, "_node_attributes.csv")))
+    }
+  }
+  
+  # 5. Prepare Return Object
+  sig_edges <- net_res$edges_table %>% dplyr::filter(Edge_Category != "Weak" & Significant == TRUE) %>% dplyr::arrange(P_Value)
+  edge_ids <- if(nrow(sig_edges) > 0) apply(sig_edges, 1, function(r) paste(sort(c(r["Node1"], r["Node2"])), collapse="~")) else character(0)
+  
+  rewiring_df <- NULL
+  if (!is.null(topo_ctrl) && !is.null(topo_case)) {
+    rewiring_df <- calculate_jaccard_rewiring(net_res$adj_final$ctrl, net_res$adj_final$case)
+  }
+  
+  return(list(
+    edges_table = net_res$edges_table,
+    sig_edges = sig_edges,
+    sig_edge_ids = unique(edge_ids),
+    topo_ctrl = topo_ctrl,
+    topo_case = topo_case,
+    rewiring = rewiring_df
+  ))
+}

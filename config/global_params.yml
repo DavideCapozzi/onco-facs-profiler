@@ -20,6 +20,13 @@ case_groups: ["HNSCC_EP", "NSCLC_EP", "NSCLC_LS", "HNSCC_LS"]
 # --- ANALYSIS SCENARIOS (Config-Driven Orchestration) ---
 # Each item here triggers a full analysis cycle (Hypothesis -> Multivariate -> Network)
 analysis_scenarios:
+  - id: "00_HDvsTumor"
+    description: "Global comparison of Healthy Donors against all cancer patients (EP + LS)"
+    case_label: "Tumor"
+    case_groups: ["HNSCC_EP", "NSCLC_EP", "HNSCC_LS", "NSCLC_LS"]
+    control_label: "HD"
+    control_groups: ["Healthy_Donors"]
+
   - id: "01_HDvsEP"
     description: "Characterizing the disease signature"
     case_label: "EP"
@@ -163,6 +170,7 @@ colors:
     HD: "#2E8B57"   
     EP: "#CD5C5C"  
     LS: "#FFD700"   
+    Tumor: "#8B0000"
 
   highlight: "#FFD700"  
 
