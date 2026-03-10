@@ -8,6 +8,55 @@
 
 library(dplyr)
 
+#' @title Annotate Node Topology with Marker Categories
+#' @description Safely maps config-defined marker categories to node attributes.
+#'              Handles empty lists, prevents row duplication, and sanitizes types.
+#' @param node_df Dataframe containing at least a 'Node' column.
+#' @param config Global configuration list.
+#' @return Dataframe with an appended 'Marker_Category' column.
+annotate_marker_categories <- function(node_df, config) {
+  if (is.null(node_df) || !("Node" %in% names(node_df))) return(node_df)
+  
+  # Protect against pre-existing column conflicts
+  if ("Marker_Category" %in% names(node_df)) {
+    node_df$Marker_Category <- NULL
+  }
+  
+  if (is.null(config$qc_reporting$marker_categories)) {
+    node_df$Marker_Category <- "Other"
+    return(node_df)
+  }
+  
+  cat_list <- config$qc_reporting$marker_categories
+  
+  # Safely construct mapping dataframe bypassing empty lists
+  cat_df_list <- lapply(names(cat_list), function(cat_name) {
+    nodes_in_cat <- unlist(cat_list[[cat_name]])
+    if (length(nodes_in_cat) > 0) {
+      data.frame(Node = as.character(nodes_in_cat), 
+                 Marker_Category = as.character(cat_name), 
+                 stringsAsFactors = FALSE)
+    } else {
+      NULL
+    }
+  })
+  
+  cat_df <- do.call(rbind, Filter(Negate(is.null), cat_df_list))
+  
+  if (!is.null(cat_df) && nrow(cat_df) > 0) {
+    # Resolve conflicting manual assignments in config by keeping the first match
+    cat_df <- cat_df[!duplicated(cat_df$Node), ]
+    node_df <- dplyr::left_join(node_df, cat_df, by = "Node")
+  } else {
+    node_df$Marker_Category <- NA_character_
+  }
+  
+  # Impute uncategorized markers
+  node_df$Marker_Category[is.na(node_df$Marker_Category)] <- "Other"
+  
+  return(node_df)
+}
+
 #' @title Execute Complete Statistical Pipeline for a Single Scenario
 #' @description 
 #' Filters data, handles zero-variance, checks dispersion assumptions, 
@@ -250,6 +299,10 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
     topo_diff <- calculate_node_topology(adj_diff)
     if (!is.null(topo_diff)) {
       all_nodes <- topo_diff %>% dplyr::select(Node, Degree, Betweenness, Closeness, Eigen_Centrality)
+      
+      # Robust marker categorization integration
+      all_nodes <- annotate_marker_categories(all_nodes, config)
+      
       if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
         drv_summ <- spls_drivers %>% dplyr::group_by(Marker) %>% dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>% dplyr::ungroup()
         all_nodes <- dplyr::left_join(all_nodes, drv_summ[, c("Marker", "Importance", "Direction")], by = c("Node" = "Marker"))

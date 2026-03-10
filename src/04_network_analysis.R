@@ -101,6 +101,7 @@ for (label in names(macro_groups)) {
     
     topo_base <- calculate_node_topology(adj)
     if (!is.null(topo_base)) {
+      topo_base <- annotate_marker_categories(topo_base, config)
       readr::write_csv(topo_base, file.path(cyto_base_dir, paste0(label, "_node_attributes.csv")))
     }
   }
