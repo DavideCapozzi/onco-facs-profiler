@@ -64,10 +64,14 @@ for (label in names(macro_groups)) {
   valid_cols <- names(vars)[!(vars < var_thresh | is.na(vars))]
   if (length(valid_cols) < 2) next
   
+  # Fallback logic for parallelization
+  auto_cores <- max(1, parallel::detectCores(logical = TRUE) - 1, na.rm = TRUE)
+  target_cores <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") as.numeric(config$stats$n_cores) else auto_cores
+  
   base_obj_raw <- compute_universal_baseline(
     mat = sub_mat[, valid_cols, drop = FALSE], label = label,
     n_boot = if(!is.null(config$stats$n_boot)) config$stats$n_boot else 100, seed = if(!is.null(config$stats$seed)) config$stats$seed else 123,
-    n_cores = if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1,
+    n_cores = target_cores,
     threshold_type = if(!is.null(config$stats$network_threshold_type)) config$stats$network_threshold_type else "percentile",
     threshold_value = if(!is.null(config$stats$network_edge_threshold)) config$stats$network_edge_threshold else 0.15
   )

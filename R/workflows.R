@@ -87,12 +87,16 @@ run_scenario_pipeline <- function(scenario, full_mat, full_meta, config, out_dir
   
   # 5. sPLS-DA & Visualization
   valid_levels <- names(counts)[counts > 0]
-  if (length(valid_levels) >= 2 && min(counts[valid_levels]) >= 2) {
+  
+  # Enforce minimum 3 samples per class to safely execute CV without crashing mixOmics
+  if (length(valid_levels) >= 2 && min(counts[valid_levels]) >= 3) {
     tryCatch({
       n_comp <- if(!is.null(config$multivariate$n_comp)) config$multivariate$n_comp else 2
       cv_folds <- if(!is.null(config$multivariate$validation_folds)) config$multivariate$validation_folds else 5
       actual_folds <- min(cv_folds, min(counts[valid_levels]))
-      if (actual_folds < 2) actual_folds <- 2
+      
+      # Secondary safety constraint for fold assignment
+      if (actual_folds < 3) actual_folds <- 3
       
       spls_res <- run_splsda_model(
         data_z = sub_mat,
@@ -138,7 +142,7 @@ run_scenario_pipeline <- function(scenario, full_mat, full_meta, config, out_dir
       }
     }, error = function(e) message(sprintf("      [Fail] sPLS-DA failed: %s", e$message)))
   } else {
-    message("      [Skip] sPLS-DA skipped: Class size too small for CV (<2).")
+    message("      [Skip] sPLS-DA skipped: Class size too small for reliable CV (<3).")
   }
   
   return(res_list)
@@ -162,13 +166,17 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
   
+  # Fallback for parallelization
+  auto_cores <- max(1, parallel::detectCores(logical = TRUE) - 1, na.rm = TRUE)
+  target_cores <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") as.numeric(config$stats$n_cores) else auto_cores
+  
   # 1. Differential Overlay
   net_res <- compute_differential_overlay(
     base_ctrl = base_ctrl,
     base_case = base_case,
     n_perm = if(!is.null(config$stats$n_perm)) config$stats$n_perm else 1000,
     seed = if(!is.null(config$stats$seed)) config$stats$seed else 123,
-    n_cores = if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") config$stats$n_cores else 1,
+    n_cores = target_cores,
     pvalue_thresh = if(!is.null(config$stats$pvalue_threshold)) config$stats$pvalue_threshold else 0.05,
     min_marginal_cor = if(!is.null(config$stats$min_marginal_cor)) config$stats$min_marginal_cor else 0.10
   )

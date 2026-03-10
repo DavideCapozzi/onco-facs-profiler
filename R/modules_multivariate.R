@@ -42,6 +42,11 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
     folds <- min_samples_per_class
   }
   
+  # Enforce absolute minimum folds required by mixOmics for Mfold CV
+  if (validation_method == "Mfold" && folds < 3) {
+    stop("Minimum 3 samples per class required for M-fold cross-validation. Analysis aborted.")
+  }
+  
   # 1. Tuning Step: Determine optimal keepX
   message(sprintf("   [sPLS-DA] Tuning optimal features (keepX) for %d components...", n_comp))
   
@@ -77,7 +82,7 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
     folds = folds, 
     dist = "max.dist", 
     progressBar = FALSE,
-    nrepeat = n_repeat  # Updated: Uses argument instead of hardcoded 50
+    nrepeat = n_repeat  
   )
   
   choice_keepX <- tune_splsda$choice.keepX
@@ -92,7 +97,7 @@ run_splsda_model <- function(data_z, metadata, group_col = "Group", n_comp = 2,
   # We wrap this in tryCatch as perf() can sometimes fail on edge cases
   perf_splsda <- tryCatch({
     mixOmics::perf(final_model, validation = validation_method, folds = folds, 
-                   progressBar = FALSE, nrepeat = n_repeat, auc = TRUE) # Updated: Uses n_repeat
+                   progressBar = FALSE, nrepeat = n_repeat, auc = TRUE) 
   }, error = function(e) {
     message(paste("      [WARN] Performance evaluation failed:", e$message))
     return(NULL) 
