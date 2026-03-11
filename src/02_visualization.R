@@ -42,8 +42,10 @@ meta_viz <- DATA$metadata %>%
 # Align matrices
 mat_z_global <- DATA$hybrid_data_z %>%
   filter(Patient_ID %in% meta_viz$Patient_ID) %>%
+  arrange(match(Patient_ID, meta_viz$Patient_ID)) %>%
   select(all_of(DATA$hybrid_markers)) %>%
   as.matrix()
+rownames(mat_z_global) <- meta_viz$Patient_ID
 
 raw_matrix <- DATA$raw_matrix[meta_viz$Patient_ID, , drop = FALSE]
 
