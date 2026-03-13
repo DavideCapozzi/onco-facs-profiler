@@ -215,7 +215,6 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   
   if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
   
-  # Fallback for parallelization
   auto_cores <- max(1, parallel::detectCores(logical = TRUE) - 1, na.rm = TRUE)
   target_cores <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") as.numeric(config$stats$n_cores) else auto_cores
   
@@ -235,14 +234,13 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
     return(NULL)
   }
   
-  # Save Raw RDS for the scenario
   saveRDS(net_res, file.path(out_dir, paste0(scenario$id, "_Differential_Network.rds")))
   
-  # 2. Topology Calculation
+  # 2. Topology Calculation (Calculated on Statistical Existence for Global Accuracy)
   topo_ctrl <- if (sum(net_res$adj_final$ctrl)>0) calculate_node_topology(net_res$adj_final$ctrl) else NULL
   topo_case <- if (sum(net_res$adj_final$case)>0) calculate_node_topology(net_res$adj_final$case) else NULL
   
-  # 3. Visualizations (PDFs)
+  # 3. Visualizations
   if (!is.null(spls_drivers) && nrow(spls_drivers) > 0 && (!is.null(topo_ctrl) || !is.null(topo_case))) {
     pdf(file.path(out_dir, paste0(scenario$id, "_Hub_Driver_Report.pdf")), width = 11, height = 8)
     if(!is.null(topo_ctrl)) print(plot_hub_driver_quadrant(integrate_hub_drivers(spls_drivers, topo_ctrl, "Degree"), "Degree", paste("\nNetwork:", scenario$control_label)))
@@ -267,30 +265,42 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   if(!is.null(topo_case)) print(plot_network_structure(net_res$adj_final$case, net_res$networks$case, title = paste("Case:", scenario$case_label), min_cor = 0))
   dev.off()
   
-  # 4. Cytoscape Export
+  # 4. CYTOSCAPE EXPORT (Dynamic Filtering via Config)
   cyto_dir <- file.path(out_dir, "cytoscape_export")
   if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
   
-  diff_edges <- net_res$edges_table %>% dplyr::filter(Significant == TRUE & Edge_Category != "Weak")
+  # Fetch Export Configurations
+  d_conf <- config$cytoscape_export$differential
+  min_diff <- if(!is.null(d_conf$min_diff_score)) d_conf$min_diff_score else 0.15
+  min_stab <- if(!is.null(d_conf$min_stability_freq_any)) d_conf$min_stability_freq_any else 0.95
+  excl_cons <- if(!is.null(d_conf$exclude_conserved)) d_conf$exclude_conserved else TRUE
+  
+  # Apply complex logic robustly
+  diff_edges <- net_res$edges_table %>%
+    dplyr::filter(
+      Significant == TRUE, # Must pass baseline topological significance
+      Diff_Score >= min_diff, # Must exceed magnitude delta
+      dplyr::if_any(dplyr::starts_with("StabFreq_"), ~ .x >= min_stab) # At least one state is highly stable
+    )
+  
+  if (excl_cons) {
+    diff_edges <- diff_edges %>% dplyr::filter(!Edge_Category %in% c("Conserved", "Weak"))
+  } else {
+    diff_edges <- diff_edges %>% dplyr::filter(Edge_Category != "Weak")
+  }
+  
   if (nrow(diff_edges) > 0) {
     diff_net <- diff_edges %>%
       dplyr::select(
-        Source = Node1, 
-        Target = Node2, 
-        Weight = Diff_Score, 
-        Significant, 
-        P_Value, 
-        FDR, 
-        Edge_Category,
-        dplyr::starts_with("Pcor_"),
-        dplyr::starts_with("Spearman_"),
-        dplyr::starts_with("Mech_"),
-        dplyr::starts_with("Is_Stable_"),
-        dplyr::starts_with("StabFreq_")
+        Source = Node1, Target = Node2, Weight = Diff_Score, Significant, P_Value, FDR, Edge_Category,
+        dplyr::starts_with("Pcor_"), dplyr::starts_with("Spearman_"),
+        dplyr::starts_with("Mech_"), dplyr::starts_with("Is_Stable_"), dplyr::starts_with("StabFreq_")
       ) %>%
       dplyr::rename(Interaction = Edge_Category)
+    
     readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))
     
+    # Recalculate specific topology strictly for exported nodes to keep visual output perfectly aligned
     diff_nodes <- unique(c(diff_edges$Node1, diff_edges$Node2))
     adj_diff <- matrix(0, nrow = length(diff_nodes), ncol = length(diff_nodes), dimnames = list(diff_nodes, diff_nodes))
     for(k in 1:nrow(diff_edges)) {
@@ -301,8 +311,6 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
     topo_diff <- calculate_node_topology(adj_diff)
     if (!is.null(topo_diff)) {
       all_nodes <- topo_diff %>% dplyr::select(Node, Degree, Betweenness, Closeness, Eigen_Centrality)
-      
-      # Robust marker categorization integration
       all_nodes <- annotate_marker_categories(all_nodes, config)
       
       if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
@@ -315,7 +323,7 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
     }
   }
   
-  # 5. Prepare Return Object
+  # 5. Prepare Return Object (Passed to Meta-Analysis)
   sig_edges <- net_res$edges_table %>% dplyr::filter(Edge_Category != "Weak" & Significant == TRUE) %>% dplyr::arrange(P_Value)
   edge_ids <- if(nrow(sig_edges) > 0) apply(sig_edges, 1, function(r) paste(sort(c(r["Node1"], r["Node2"])), collapse="~")) else character(0)
   

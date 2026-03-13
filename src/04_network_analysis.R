@@ -64,7 +64,6 @@ for (label in names(macro_groups)) {
   valid_cols <- names(vars)[!(vars < var_thresh | is.na(vars))]
   if (length(valid_cols) < 2) next
   
-  # Fallback logic for parallelization
   auto_cores <- max(1, parallel::detectCores(logical = TRUE) - 1, na.rm = TRUE)
   target_cores <- if(!is.null(config$stats$n_cores) && config$stats$n_cores != "auto") as.numeric(config$stats$n_cores) else auto_cores
   
@@ -79,33 +78,53 @@ for (label in names(macro_groups)) {
   all_features <- colnames(sub_mat)
   baselines[[label]] <- list(
     label = base_obj_raw$label, mat = sub_mat, 
-    pcor = pad_matrix(base_obj_raw$pcor, all_features, 0), 
-    raw_cor = pad_matrix(base_obj_raw$raw_cor, all_features, 0),
+    pcor = pad_matrix(base_obj_raw$pcor, all_features, 0), raw_cor = pad_matrix(base_obj_raw$raw_cor, all_features, 0),
     stability = pad_matrix(base_obj_raw$stability, all_features, 0), 
     stability_freq = pad_matrix(base_obj_raw$stability_freq, all_features, 0),
     adj_final = pad_matrix(base_obj_raw$adj_final, all_features, FALSE),
     applied_threshold = base_obj_raw$applied_threshold
   )
   
-  # Export Cytoscape Baseline directly as CSV (Pure I/O, no Excel)
-  adj <- base_obj_raw$adj_final
-  edges_idx <- which(upper.tri(adj) & adj, arr.ind = TRUE)
+  # --- CYTOSCAPE BASELINE EXPORT (Dynamic Filtering) ---
+  pcor_mat <- base_obj_raw$pcor
+  stab_mat <- base_obj_raw$stability_freq
+  edges_idx <- which(upper.tri(pcor_mat), arr.ind = TRUE)
   
   if (nrow(edges_idx) > 0) {
-    nodes <- colnames(adj)
-    base_edges <- data.frame(
+    nodes <- colnames(pcor_mat)
+    
+    # Build complete raw edge list
+    base_edges_all <- data.frame(
       Source = nodes[edges_idx[,1]],
       Target = nodes[edges_idx[,2]],
-      Pcor = base_obj_raw$pcor[edges_idx],
-      Is_Stable = TRUE,
+      Pcor = pcor_mat[edges_idx],
+      StabFreq = stab_mat[edges_idx],
       stringsAsFactors = FALSE
     )
-    readr::write_csv(base_edges, file.path(cyto_base_dir, paste0(label, "_baseline_network.csv")))
     
-    topo_base <- calculate_node_topology(adj)
-    if (!is.null(topo_base)) {
-      topo_base <- annotate_marker_categories(topo_base, config)
-      readr::write_csv(topo_base, file.path(cyto_base_dir, paste0(label, "_node_attributes.csv")))
+    # Apply dynamic config filters
+    b_conf <- config$cytoscape_export$baseline
+    min_pcor <- if(!is.null(b_conf$min_abs_pcor)) b_conf$min_abs_pcor else 0.15
+    min_stab <- if(!is.null(b_conf$min_stability_freq)) b_conf$min_stability_freq else 0.95
+    
+    base_edges <- base_edges_all %>%
+      dplyr::filter(abs(Pcor) >= min_pcor & StabFreq >= min_stab)
+    
+    if (nrow(base_edges) > 0) {
+      readr::write_csv(base_edges, file.path(cyto_base_dir, paste0(label, "_baseline_network.csv")))
+      
+      # Rebuild adjacency strictly for exported nodes to generate clean node attributes
+      adj_export <- matrix(0, nrow = length(nodes), ncol = length(nodes), dimnames = list(nodes, nodes))
+      for(k in 1:nrow(base_edges)) {
+        adj_export[base_edges$Source[k], base_edges$Target[k]] <- 1
+        adj_export[base_edges$Target[k], base_edges$Source[k]] <- 1
+      }
+      
+      topo_base <- calculate_node_topology(adj_export)
+      if (!is.null(topo_base)) {
+        topo_base <- annotate_marker_categories(topo_base, config)
+        readr::write_csv(topo_base, file.path(cyto_base_dir, paste0(label, "_node_attributes.csv")))
+      }
     }
   }
 }

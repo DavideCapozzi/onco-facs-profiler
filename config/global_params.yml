@@ -188,7 +188,6 @@ colors:
     median: "black"
 
 viz:
-  min_edge_weight: 0.15 
   heatmap_metadata: ["Group", "Original_Source"]
   merge_case_groups: false
   highlight_pattern: "_LS"
@@ -207,5 +206,16 @@ stats:
   network_edge_threshold: 0.1
   min_marginal_cor: 0.10
   n_cores: "auto"
+
+# --- CYTOSCAPE EXPORT FILTERS ---
+cytoscape_export:
+  baseline:
+    min_stability_freq: 0.95 # Un arco deve apparire nel 95% dei bootstrap
+    min_abs_pcor: 0.15       # Magnitudo minima dell'arco nel singolo gruppo
+  
+  differential:
+    exclude_conserved: true  
+    min_diff_score: 0.10    
+    min_stability_freq_any: 0.95 
 
 EOF: TRUE
