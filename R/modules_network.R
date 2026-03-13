@@ -172,6 +172,7 @@ compute_universal_baseline <- function(mat, label = "Group", n_boot = 100, seed 
     pcor = obs_pcor,
     raw_cor = raw_cor,
     stability = agg$adj,
+    stability_freq = agg$stability,
     adj_final = adj_final,
     applied_threshold = actual_thresh
   ))
@@ -298,6 +299,8 @@ compute_differential_overlay <- function(base_ctrl, base_case, n_perm = 1000, se
       Weight_Case = base_case$pcor[i,j],
       Is_Stable_Ctrl = base_ctrl$stability[i,j] == 1,
       Is_Stable_Case = base_case$stability[i,j] == 1,
+      StabFreq_Ctrl = base_ctrl$stability_freq[i,j], 
+      StabFreq_Case = base_case$stability_freq[i,j],
       Is_Valid_Ctrl = is_valid_ctrl,
       Is_Valid_Case = is_valid_case,
       Diff_Score = obs_val,

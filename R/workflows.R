@@ -284,7 +284,9 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
         Edge_Category,
         dplyr::starts_with("Pcor_"),
         dplyr::starts_with("Spearman_"),
-        dplyr::starts_with("Mech_")
+        dplyr::starts_with("Mech_"),
+        dplyr::starts_with("Is_Stable_"),
+        dplyr::starts_with("StabFreq_")
       ) %>%
       dplyr::rename(Interaction = Edge_Category)
     readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))

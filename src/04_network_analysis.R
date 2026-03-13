@@ -79,8 +79,11 @@ for (label in names(macro_groups)) {
   all_features <- colnames(sub_mat)
   baselines[[label]] <- list(
     label = base_obj_raw$label, mat = sub_mat, 
-    pcor = pad_matrix(base_obj_raw$pcor, all_features, 0), raw_cor = pad_matrix(base_obj_raw$raw_cor, all_features, 0),
-    stability = pad_matrix(base_obj_raw$stability, all_features, 0), adj_final = pad_matrix(base_obj_raw$adj_final, all_features, FALSE),
+    pcor = pad_matrix(base_obj_raw$pcor, all_features, 0), 
+    raw_cor = pad_matrix(base_obj_raw$raw_cor, all_features, 0),
+    stability = pad_matrix(base_obj_raw$stability, all_features, 0), 
+    stability_freq = pad_matrix(base_obj_raw$stability_freq, all_features, 0),
+    adj_final = pad_matrix(base_obj_raw$adj_final, all_features, FALSE),
     applied_threshold = base_obj_raw$applied_threshold
   )
   
