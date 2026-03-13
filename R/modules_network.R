@@ -75,7 +75,7 @@ check_boot_yield <- function(res_obj, n_req, label) {
 
 #' @title Aggregate Bootstrap Results
 #' @description Calculates edge stability and mean weights based on CI.
-aggregate_boot_results <- function(boot_list, alpha = 0.05) {
+aggregate_boot_results <- function(boot_list, alpha = 0.10) {
   valid_boots <- Filter(Negate(is.null), boot_list)
   n_boots <- length(valid_boots)
   if (n_boots == 0) stop("All bootstrap iterations failed.")
@@ -143,7 +143,7 @@ compute_universal_baseline <- function(mat, label = "Group", n_boot = 100, seed 
   }
   
   boots <- Filter(Negate(is.null), res_list)
-  agg <- aggregate_boot_results(boots, alpha = 0.05)
+  agg <- aggregate_boot_results(boots, alpha = 0.10)
   check_boot_yield(agg, n_boot, label)
   
   # 2. PCOR & MAGNITUDE THRESHOLDING
