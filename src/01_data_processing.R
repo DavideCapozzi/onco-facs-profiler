@@ -44,15 +44,22 @@ if (!is.null(config$sample_selection$blacklist) && length(config$sample_selectio
     message(sprintf("[Data] Dropping %d samples defined in blacklist.", length(samples_to_drop)))
     
     # Store details for QC report
-    dropped_indices <- which(rownames(mat_raw) %in% samples_to_drop)
+    # [FIX] Use match() to align indices and [[]] subsetting to prevent tibble string coercion
+    dropped_indices <- match(samples_to_drop, metadata_raw$Patient_ID)
     
     dropped_samples_apriori <- data.frame(
       Patient_ID = samples_to_drop,
       NA_Percent = NA, 
       Reason = "A Priori",
-      Original_Source = if (subgroup_col %in% colnames(metadata_raw)) as.character(metadata_raw[dropped_indices, subgroup_col]) else "N/A",
+      Original_Source = if (!is.null(subgroup_col) && subgroup_col %in% colnames(metadata_raw)) {
+        as.character(metadata_raw[[subgroup_col]][dropped_indices])
+      } else {
+        "N/A"
+      },
       stringsAsFactors = FALSE
     )
+    
+    # Apply filter
     
     # Apply filter
     target_samples <- setdiff(target_samples, samples_to_drop)

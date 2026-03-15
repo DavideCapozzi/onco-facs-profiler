@@ -707,7 +707,7 @@ viz_plot_splsda_heatmap <- function(mat_z, metadata, group_col, colors, title = 
 #' @title Report sPLS-DA Visualization 
 #' @description 
 #' Generates a comprehensive PDF report for sPLS-DA results.
-#' Includes robust error handling for PDF device closing.
+#' Includes robust error handling for PDF device closing and ggplot fallback.
 #' 
 #' @param pls_res The result object from run_splsda_model.
 #' @param drivers_df Dataframe of extracted loadings.
@@ -749,7 +749,14 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
   
   n_comps <- pls_res$model$ncomp
   
-  # 1. Native ggplot2 Biplot (Bypassing mixOmics wrapper to guarantee color/legend alignment)
+  # Helper for clean ggplot error messages
+  plot_error_msg <- function(msg) {
+    ggplot() + 
+      annotate("text", x = 0, y = 0, label = msg, color = "darkred", size = 5, fontface = "bold") + 
+      theme_void()
+  }
+  
+  # 1. Native ggplot2 Biplot
   tryCatch({
     variates_df <- as.data.frame(pls_res$model$variates$X[, 1:2, drop = FALSE])
     colnames(variates_df) <- c("PC1", "PC2")
@@ -776,7 +783,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
     
     print(p_biplot)
   }, error = function(e) {
-    plot.new(); text(0.5, 0.5, paste("Biplot Error:", e$message))
+    print(plot_error_msg(paste("Biplot Error:", e$message)))
   })
   
   # 2. Loadings & Boxplots
@@ -834,7 +841,6 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
       mks <- unique(drivers_df$Marker)
       mat_sub <- pls_res$model$X[, mks, drop = FALSE]
       
-      # Use metadata exactly matching the matrix rows
       meta_hm <- metadata_viz[match(rownames(mat_sub), metadata_viz$Patient_ID), ]
       
       hm <- viz_plot_splsda_heatmap(
@@ -847,7 +853,7 @@ viz_report_plsda <- function(pls_res, drivers_df, metadata_viz, colors_viz, out_
       
       ComplexHeatmap::draw(hm, merge_legend = TRUE)
     }, error = function(e) {
-      plot.new(); text(0.5, 0.5, paste("Heatmap Error:", e$message))
+      print(plot_error_msg(paste("Heatmap Error:", e$message)))
     })
   }
 }
@@ -934,13 +940,11 @@ plot_network_structure <- function(adj_mat, weight_mat, title = "Network",
 #' @return Returns the plot object.
 viz_plot_differential_overlap <- function(edge_list, fill_colors = NULL, title = "Differential Overlap") {
   
-  # Silently load required packages to reduce log verbosity
-  suppressPackageStartupMessages({
-    requireNamespace("ComplexHeatmap", quietly = TRUE)
-    requireNamespace("grid", quietly = TRUE)
-    requireNamespace("ggVennDiagram", quietly = TRUE)
-    requireNamespace("ggplot2", quietly = TRUE)
-  })
+  # Clean dependency loading without suppressPackageStartupMessages wrapper
+  requireNamespace("ComplexHeatmap", quietly = TRUE)
+  requireNamespace("grid", quietly = TRUE)
+  requireNamespace("ggVennDiagram", quietly = TRUE)
+  requireNamespace("ggplot2", quietly = TRUE)
   
   if (length(edge_list) < 2) {
     warning("[Viz] Need at least 2 sets for overlap analysis.")
@@ -968,29 +972,16 @@ viz_plot_differential_overlap <- function(edge_list, fill_colors = NULL, title =
   # --- LOGIC: VENN (<= 3 sets) vs UPSET (> 3 sets) ---
   if (length(edge_list) <= 3) {
     
-    # Use suppressMessages to avoid internal ggVennDiagram styling logs
-    suppressMessages({
-      # 1. Generate base Venn
-      # set_color defines the circle outlines. label_alpha=0 removes label background.
-      p <- ggVennDiagram::ggVennDiagram(edge_list, label_alpha = 0, set_color = "black") +
-        
-        # 2. Visualization Overrides (User Request: No Gradient, Fix Labels)
-        # Force fill to white to remove the "heatmap" effect based on counts
-        ggplot2::scale_fill_gradient(low = "white", high = "white") +
-        
-        # Remove the legend since fill is now meaningless
-        ggplot2::theme(legend.position = "none") +
-        
-        # Add title and format
-        ggplot2::labs(title = title) +
-        ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")) +
-        
-        # 3. Fix Label Cutoff
-        # Expand x-axis by 20% on both sides to accommodate long category names
-        ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.2))
-    })
+    # Render Venn
+    p <- ggVennDiagram::ggVennDiagram(edge_list, label_alpha = 0, set_color = "black") +
+      
+      # Visualization Overrides
+      ggplot2::scale_fill_gradient(low = "white", high = "white") +
+      ggplot2::theme(legend.position = "none") +
+      ggplot2::labs(title = title) +
+      ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")) +
+      ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.2))
     
-    # Explicitly render
     print(p)
     return(p)
     
@@ -1007,14 +998,14 @@ viz_plot_differential_overlap <- function(edge_list, fill_colors = NULL, title =
         m_comb,
         set_order = names(edge_list),
         comb_order = order(ComplexHeatmap::comb_size(m_comb), decreasing = TRUE),
-        pt_size = unit(3, "mm"), 
+        pt_size = grid::unit(3, "mm"), 
         lwd = 2,
         top_annotation = ComplexHeatmap::HeatmapAnnotation(
           "Intersection" = ComplexHeatmap::anno_barplot(
             ComplexHeatmap::comb_size(m_comb), 
             border = FALSE, 
             gp = grid::gpar(fill = "black"), 
-            height = unit(4, "cm")
+            height = grid::unit(4, "cm")
           ), 
           annotation_name_side = "left"
         ),

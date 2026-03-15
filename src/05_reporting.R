@@ -52,15 +52,15 @@ for (scen_id in names(payload03$scenarios)) {
   net_data  <- payload04$scenarios[[scen_id]]
   
   if (!is.null(scen_data$dispersion)) {
-    disp_sheet <- substr(paste0(scen_id, "_Disp"), 1, 31)
+    disp_sheet <- safe_sheet_name(paste0(scen_id, "_Disp"))
     addWorksheet(wb_master, disp_sheet); writeData(wb_master, disp_sheet, scen_data$dispersion, rowNames = TRUE)
   }
   if (!is.null(scen_data$permanova)) {
-    perm_sheet <- substr(paste0(scen_id, "_Perm"), 1, 31)
+    perm_sheet <- safe_sheet_name(paste0(scen_id, "_Perm"))
     addWorksheet(wb_master, perm_sheet); writeData(wb_master, perm_sheet, scen_data$permanova, rowNames = TRUE)
   }
   if (!is.null(scen_data$drivers)) {
-    drv_sheet <- substr(paste0(scen_id, "_Drv"), 1, 31)
+    drv_sheet <- safe_sheet_name(paste0(scen_id, "_Drv"))
     addWorksheet(wb_master, drv_sheet); writeData(wb_master, drv_sheet, scen_data$drivers)
     
     df <- scen_data$drivers
@@ -73,11 +73,11 @@ for (scen_id in names(payload03$scenarios)) {
   }
   
   if (!is.null(net_data$edges_table)) {
-    net_sheet <- substr(paste0(scen_id, "_Net"), 1, 31)
+    net_sheet <- safe_sheet_name(paste0(scen_id, "_Net"))
     addWorksheet(wb_master, net_sheet); writeData(wb_master, net_sheet, net_data$edges_table)
   }
   if (!is.null(net_data$sig_edges) && nrow(net_data$sig_edges) > 0) {
-    sig_sheet <- substr(paste0(scen_id, "_SigNet"), 1, 31)
+    sig_sheet <- safe_sheet_name(paste0(scen_id, "_SigNet"))
     addWorksheet(wb_master, sig_sheet); writeData(wb_master, sig_sheet, net_data$sig_edges)
   }
   
@@ -90,11 +90,11 @@ for (scen_id in names(payload03$scenarios)) {
     wb_topo <- createWorkbook()
     
     if (!is.null(net_data$topo_ctrl)) {
-      sh_name <- substr(paste0("Topology_", scen_conf$control_label), 1, 31)
+      sh_name <- safe_sheet_name(paste0("Topology_", scen_conf$control_label))
       addWorksheet(wb_topo, sh_name); writeData(wb_topo, sh_name, net_data$topo_ctrl)
     }
     if (!is.null(net_data$topo_case)) {
-      sh_name <- substr(paste0("Topology_", scen_conf$case_label), 1, 31)
+      sh_name <- safe_sheet_name(paste0("Topology_", scen_conf$case_label))
       addWorksheet(wb_topo, sh_name); writeData(wb_topo, sh_name, net_data$topo_case)
     }
     if (!is.null(net_data$rewiring)) {

@@ -397,3 +397,12 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
   saveWorkbook(wb, out_path, overwrite = TRUE)
   message(sprintf("[IO] QC Report saved to: %s", out_path))
 }
+
+#' @title Safe Excel Sheet Name
+#' @description Truncates a string to comply with Excel's 31-character limit for sheet names.
+#' @param name String to truncate.
+#' @param max_len Integer. Maximum character length (default 31).
+#' @return Truncated string safe for openxlsx.
+safe_sheet_name <- function(name, max_len = 31) {
+  return(substr(name, 1, max_len))
+}

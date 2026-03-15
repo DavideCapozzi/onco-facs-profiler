@@ -164,8 +164,8 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
     message(sprintf("   [QC] Dropping %d patients with >%.0f%% missingness.", 
                     length(pids), qc_config$max_na_row_pct * 100))
     
-    # Capture Original_Source info for report
-    group_info <- if(stratification_col %in% colnames(curr_meta)) {
+    # Capture Original_Source info for report (Protected against NULL)
+    group_info <- if(!is.null(stratification_col) && stratification_col %in% colnames(curr_meta)) {
       as.character(curr_meta[[stratification_col]][drop_row_na])
     } else { rep("N/A", length(pids)) }
     
@@ -203,7 +203,6 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
   if (!is.null(qc_config$remove_outliers) && qc_config$remove_outliers) {
     message("   [QC] Checking for multivariate outliers (PCA-based)...")
     
-    # We use 'Group' for calculation
     if ("Group" %in% names(curr_meta)) {
       is_outlier <- detect_pca_outliers(curr_mat, curr_meta$Group, 
                                         conf_level = qc_config$outlier_conf_level)
@@ -212,8 +211,8 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
         out_pids <- rownames(curr_mat)[is_outlier]
         message(sprintf("   [QC] Dropping %d outliers detected based on group distribution.", length(out_pids)))
         
-        # Capture Original_Source info for report
-        target_info_col <- if(stratification_col %in% colnames(curr_meta)) stratification_col else "Group"
+        # Capture Original_Source info for report (Protected against NULL)
+        target_info_col <- if(!is.null(stratification_col) && stratification_col %in% colnames(curr_meta)) stratification_col else "Group"
         group_info <- as.character(curr_meta[[target_info_col]][is_outlier])
         
         qc_summary$dropped_rows_detail <- rbind(qc_summary$dropped_rows_detail, data.frame(
@@ -232,9 +231,9 @@ run_qc_pipeline <- function(mat_raw, metadata, qc_config,
     }
   }
   
-  # Capture the mapping between Stratification Column (Subgroup) and Group for the report
+  # Capture the mapping between Stratification Column (Subgroup) and Group for the report (Protected)
   group_map <- unique(data.frame(
-    Subgroup = if(stratification_col %in% colnames(curr_meta)) as.character(curr_meta[[stratification_col]]) else "All",
+    Subgroup = if(!is.null(stratification_col) && stratification_col %in% colnames(curr_meta)) as.character(curr_meta[[stratification_col]]) else "All",
     Group = if("Group" %in% colnames(curr_meta)) as.character(curr_meta$Group) else "All",
     stringsAsFactors = FALSE
   ))

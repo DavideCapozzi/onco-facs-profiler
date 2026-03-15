@@ -165,7 +165,12 @@ if (length(diff_edges_list) >= 2) {
   pdf(file.path(meta_dir, "Differential_Networks_Overlap.pdf"), width = 8, height = 8)
   tryCatch({
     viz_plot_differential_overlap(edge_list = diff_edges_list, fill_colors = scenario_colors, title = "Differential Edges Overlap")
-  }, error = function(e) { plot.new(); text(0.5,0.5, "Plot Error") })
+  }, error = function(e) { 
+    p_err <- ggplot2::ggplot() + 
+      ggplot2::annotate("text", x = 0, y = 0, label = paste("Overlap Plot Error:", e$message), color = "darkred", size = 5, fontface = "bold") + 
+      ggplot2::theme_void()
+    print(p_err)
+  })
   dev.off()
   
   payload04$meta_analysis$diff_edges_list <- diff_edges_list
