@@ -5,12 +5,6 @@
 #              a unified Excel Workbook, isolating I/O formatting.
 # ==============================================================================
 
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(openxlsx)
-  library(ComplexHeatmap)
-})
-
 source("R/utils_io.R")
 
 message("\n=== PIPELINE STEP 5: MASTER REPORT GENERATION ===")
@@ -162,5 +156,5 @@ if ("All_Drivers_Summary" %in% sheet_names) {
 
 master_report_path <- file.path(results_dir, "Multi_Scenario_Analysis_Report.xlsx")
 saveWorkbook(wb_master, master_report_path, overwrite = TRUE)
-message(sprintf("   [Output] Master Report perfectly generated: %s", master_report_path))
+message(sprintf("   [Output] Master Report saved to: %s", master_report_path))
 message("=== STEP 5 COMPLETE ===\n")

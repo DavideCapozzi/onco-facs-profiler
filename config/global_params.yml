@@ -210,12 +210,12 @@ stats:
 # --- CYTOSCAPE EXPORT FILTERS ---
 cytoscape_export:
   baseline:
-    min_stability_freq: 0.95 # Un arco deve apparire nel 95% dei bootstrap
-    min_abs_pcor: 0.15       # Magnitudo minima dell'arco nel singolo gruppo
+    min_stability_freq: 0.95 
+    min_abs_pcor: 0.15      
   
   differential:
     exclude_conserved: true  
-    min_diff_score: 0.10    
+    min_diff_score: 0.10
     min_stability_freq_any: 0.95 
 
 EOF: TRUE

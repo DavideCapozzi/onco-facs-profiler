@@ -5,12 +5,6 @@
 #              Iterative Multi-Scenario execution. Outputs a binary payload.
 # ==============================================================================
 
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(vegan)
-  library(mixOmics)
-})
-
 source("R/utils_io.R")          
 source("R/modules_hypothesis.R") 
 source("R/modules_multivariate.R")

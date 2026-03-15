@@ -4,12 +4,6 @@
 # Description: Data ingestion + QC + hybrid coda preprocessing
 # ==============================================================================
 
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(openxlsx)
-  library(pcaMethods)
-})
-
 source("R/utils_io.R")     
 source("R/modules_coda.R") 
 source("R/modules_qc.R")   

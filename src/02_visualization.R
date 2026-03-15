@@ -4,14 +4,6 @@
 # Description: Generates overview plots (Distributions, PCA, Heatmap)
 # ==============================================================================
 
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(FactoMineR)
-  library(factoextra)
-  library(ComplexHeatmap)
-  library(circlize)
-})
-
 source("R/utils_io.R")          
 source("R/modules_viz.R")
 

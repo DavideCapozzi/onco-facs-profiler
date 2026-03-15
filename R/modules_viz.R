@@ -30,10 +30,6 @@ theme_coda <- function() {
     )
 }
 
-# R/modules_viz.R
-
-# R/modules_viz.R
-
 #' @title Generate Dynamic Group Palette (Root-Aware)
 #' @description 
 #' Centralized color logic with intelligent matching using a safe List-based approach.

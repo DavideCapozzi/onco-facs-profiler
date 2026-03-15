@@ -5,10 +5,6 @@
 #              via workflows. Outputs binary payload.
 # ==============================================================================
 
-suppressPackageStartupMessages({
-  library(tidyverse)
-})
-
 source("R/utils_io.R")
 source("R/modules_viz.R")
 source("R/modules_network.R")
