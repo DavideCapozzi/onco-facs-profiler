@@ -269,25 +269,10 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   cyto_dir <- file.path(out_dir, "cytoscape_export")
   if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
   
-  # Fetch Export Configurations
+  # Fetch Export Configurations and apply Rank-Based Backbone filter
   d_conf <- config$cytoscape_export$differential
-  min_diff <- if(!is.null(d_conf$min_diff_score)) d_conf$min_diff_score else 0.15
-  min_stab <- if(!is.null(d_conf$min_stability_freq_any)) d_conf$min_stability_freq_any else 0.95
-  excl_cons <- if(!is.null(d_conf$exclude_conserved)) d_conf$exclude_conserved else TRUE
   
-  # Apply complex logic robustly
-  diff_edges <- net_res$edges_table %>%
-    dplyr::filter(
-      Significant == TRUE, # Must pass baseline topological significance
-      Diff_Score >= min_diff, # Must exceed magnitude delta
-      dplyr::if_any(dplyr::starts_with("StabFreq_"), ~ .x >= min_stab) # At least one state is highly stable
-    )
-  
-  if (excl_cons) {
-    diff_edges <- diff_edges %>% dplyr::filter(!Edge_Category %in% c("Conserved", "Weak"))
-  } else {
-    diff_edges <- diff_edges %>% dplyr::filter(Edge_Category != "Weak")
-  }
+  diff_edges <- filter_differential_export(net_res$edges_table, d_conf)
   
   if (nrow(diff_edges) > 0) {
     diff_net <- diff_edges %>%

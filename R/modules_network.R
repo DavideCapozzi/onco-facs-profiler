@@ -411,6 +411,81 @@ calculate_node_topology <- function(adj_mat) {
   return(metrics)
 }
 
+#' @title Filter Baseline Network for Cytoscape Export (Backbone Strategy)
+#' @description
+#' Filters the raw baseline edges using stability and partial correlation thresholds.
+#' Optionally applies a maximum edge limit (Rank-Based) to prevent dense "hairball" networks,
+#' preserving only the strongest topological backbone.
+#'
+#' @param edges_df Dataframe containing network edges (must include StabFreq and Pcor).
+#' @param baseline_config List containing the baseline export configuration.
+#' @return Filtered dataframe ready for Cytoscape export.
+filter_baseline_backbone <- function(edges_df, baseline_config) {
+  
+  if (is.null(edges_df) || nrow(edges_df) == 0) return(edges_df)
+  
+  # Extract parameters with safe fallbacks to prevent pipeline crashes
+  min_stab <- if(!is.null(baseline_config$min_stability_freq)) baseline_config$min_stability_freq else 0.95
+  min_pcor <- if(!is.null(baseline_config$min_abs_pcor)) baseline_config$min_abs_pcor else 0.10
+  max_edges <- if(!is.null(baseline_config$max_export_edges)) baseline_config$max_export_edges else NULL
+  
+  # Apply statistical thresholds and rank by absolute partial correlation (strength)
+  df_filtered <- edges_df %>%
+    dplyr::filter(StabFreq >= min_stab, abs(Pcor) >= min_pcor) %>%
+    dplyr::arrange(dplyr::desc(abs(Pcor)))
+  
+  # Apply topological backbone limit if defined and exceeded
+  if (!is.null(max_edges) && nrow(df_filtered) > max_edges) {
+    df_filtered <- utils::head(df_filtered, max_edges)
+  }
+  
+  return(df_filtered)
+}
+
+#' @title Filter Differential Network for Cytoscape Export
+#' @description
+#' Applies statistical and stability thresholds for differential network export.
+#' Supports excluding conserved edges and applying a rank-based limit (Top N)
+#' based on the magnitude of the differential score.
+#'
+#' @param edges_df Dataframe containing differential network edges.
+#' @param diff_config List containing the differential export configuration.
+#' @return Filtered dataframe ready for Cytoscape export.
+filter_differential_export <- function(edges_df, diff_config) {
+  
+  if (is.null(edges_df) || nrow(edges_df) == 0) return(edges_df)
+  
+  # Extract parameters with safe fallbacks
+  min_diff <- if(!is.null(diff_config$min_diff_score)) diff_config$min_diff_score else 0.15
+  min_stab <- if(!is.null(diff_config$min_stability_freq_any)) diff_config$min_stability_freq_any else 0.95
+  excl_cons <- if(!is.null(diff_config$exclude_conserved)) diff_config$exclude_conserved else TRUE
+  max_edges <- if(!is.null(diff_config$max_export_edges)) diff_config$max_export_edges else NULL
+  
+  # 1. Apply baseline existence, magnitude, and stability filters
+  df_filtered <- edges_df %>%
+    dplyr::filter(
+      dplyr::if_any(dplyr::starts_with("Is_Valid_"), ~ .x == TRUE),
+      Diff_Score >= min_diff,
+      dplyr::if_any(dplyr::starts_with("StabFreq_"), ~ .x >= min_stab)
+    )
+  
+  # 2. Filter out weak/conserved based on config
+  if (excl_cons) {
+    df_filtered <- df_filtered %>% dplyr::filter(!Edge_Category %in% c("Conserved", "Weak"))
+  } else {
+    df_filtered <- df_filtered %>% dplyr::filter(Edge_Category != "Weak")
+  }
+  
+  # 3. Apply rank-based backbone limit (highest Diff_Score first)
+  if (!is.null(max_edges) && nrow(df_filtered) > max_edges) {
+    df_filtered <- df_filtered %>%
+      dplyr::arrange(dplyr::desc(Diff_Score)) %>%
+      utils::head(max_edges)
+  }
+  
+  return(df_filtered)
+}
+
 #' @title Calculate Node Jaccard Rewiring
 #' @description 
 #' Quantifies how much a node's neighborhood changes between two networks.

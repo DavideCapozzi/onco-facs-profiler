@@ -211,11 +211,13 @@ stats:
 cytoscape_export:
   baseline:
     min_stability_freq: 0.95 
-    min_abs_pcor: 0.15      
+    min_abs_pcor: 0.10
+    max_export_edges: 50 
   
   differential:
     exclude_conserved: true  
+    min_stability_freq_any: 0.95
     min_diff_score: 0.10
-    min_stability_freq_any: 0.95 
-
+    max_export_edges: 50 
+    
 EOF: TRUE

@@ -98,13 +98,10 @@ for (label in names(macro_groups)) {
       stringsAsFactors = FALSE
     )
     
-    # Apply dynamic config filters
+    # Apply dynamic config filters using the Rank-Based Backbone strategy
     b_conf <- config$cytoscape_export$baseline
-    min_pcor <- if(!is.null(b_conf$min_abs_pcor)) b_conf$min_abs_pcor else 0.15
-    min_stab <- if(!is.null(b_conf$min_stability_freq)) b_conf$min_stability_freq else 0.95
     
-    base_edges <- base_edges_all %>%
-      dplyr::filter(abs(Pcor) >= min_pcor & StabFreq >= min_stab)
+    base_edges <- filter_baseline_backbone(base_edges_all, b_conf)
     
     if (nrow(base_edges) > 0) {
       readr::write_csv(base_edges, file.path(cyto_base_dir, paste0(label, "_baseline_network.csv")))
