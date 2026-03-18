@@ -201,6 +201,8 @@ run_scenario_pipeline <- function(scenario, full_mat, full_meta, config, out_dir
 #' @description 
 #' Orchestrates differential network computation, topology calculation, 
 #' visualization (Hub-Driver, Density, Networks), and Cytoscape export.
+#' Now automatically exports remaining networks to dedicated subdirectories 
+#' if rank limits are applied.
 #' 
 #' @param scenario List containing scenario definitions.
 #' @param base_ctrl Universal baseline object for control group.
@@ -236,7 +238,7 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   
   saveRDS(net_res, file.path(out_dir, paste0(scenario$id, "_Differential_Network.rds")))
   
-  # 2. Topology Calculation (Calculated on Statistical Existence for Global Accuracy)
+  # 2. Topology Calculation
   topo_ctrl <- if (sum(net_res$adj_final$ctrl)>0) calculate_node_topology(net_res$adj_final$ctrl) else NULL
   topo_case <- if (sum(net_res$adj_final$case)>0) calculate_node_topology(net_res$adj_final$case) else NULL
   
@@ -269,44 +271,54 @@ run_network_scenario_pipeline <- function(scenario, base_ctrl, base_case, config
   cyto_dir <- file.path(out_dir, "cytoscape_export")
   if (!dir.exists(cyto_dir)) dir.create(cyto_dir)
   
-  # Fetch Export Configurations and apply Rank-Based Backbone filter
   d_conf <- config$cytoscape_export$differential
+  diff_edges_res <- filter_differential_export(net_res$edges_table, d_conf)
   
-  diff_edges <- filter_differential_export(net_res$edges_table, d_conf)
-  
-  if (nrow(diff_edges) > 0) {
-    diff_net <- diff_edges %>%
-      dplyr::select(
-        Source = Node1, Target = Node2, Weight = Diff_Score, Significant, P_Value, FDR, Edge_Category,
-        dplyr::starts_with("Pcor_"), dplyr::starts_with("Spearman_"),
-        dplyr::starts_with("Mech_"), dplyr::starts_with("Is_Stable_"), dplyr::starts_with("StabFreq_")
-      ) %>%
-      dplyr::rename(Interaction = Edge_Category)
-    
-    readr::write_csv(diff_net, file.path(cyto_dir, paste0(scenario$id, "_diff_network.csv")))
-    
-    # Recalculate specific topology strictly for exported nodes to keep visual output perfectly aligned
-    diff_nodes <- unique(c(diff_edges$Node1, diff_edges$Node2))
-    adj_diff <- matrix(0, nrow = length(diff_nodes), ncol = length(diff_nodes), dimnames = list(diff_nodes, diff_nodes))
-    for(k in 1:nrow(diff_edges)) {
-      adj_diff[diff_edges$Node1[k], diff_edges$Node2[k]] <- 1
-      adj_diff[diff_edges$Node2[k], diff_edges$Node1[k]] <- 1
-    }
-    
-    topo_diff <- calculate_node_topology(adj_diff)
-    if (!is.null(topo_diff)) {
-      all_nodes <- topo_diff %>% dplyr::select(Node, Degree, Betweenness, Closeness, Eigen_Centrality)
-      all_nodes <- annotate_marker_categories(all_nodes, config)
+  # Helper to process and export networks dynamically to designated paths
+  export_cyto_diff <- function(edges_to_export, file_suffix, target_dir) {
+    if (!is.null(edges_to_export) && nrow(edges_to_export) > 0) {
+      # Ensure target directory exists before writing
+      if (!dir.exists(target_dir)) dir.create(target_dir, recursive = TRUE)
       
-      if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
-        drv_summ <- spls_drivers %>% dplyr::group_by(Marker) %>% dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>% dplyr::ungroup()
-        all_nodes <- dplyr::left_join(all_nodes, drv_summ[, c("Marker", "Importance", "Direction")], by = c("Node" = "Marker"))
+      diff_net <- edges_to_export %>%
+        dplyr::select(
+          Source = Node1, Target = Node2, Weight = Diff_Score, Significant, P_Value, FDR, Edge_Category,
+          dplyr::starts_with("Pcor_"), dplyr::starts_with("Spearman_"),
+          dplyr::starts_with("Mech_"), dplyr::starts_with("Is_Stable_"), dplyr::starts_with("StabFreq_")
+        ) %>%
+        dplyr::rename(Interaction = Edge_Category)
+      
+      readr::write_csv(diff_net, file.path(target_dir, paste0(scenario$id, file_suffix, ".csv")))
+      
+      diff_nodes <- unique(c(edges_to_export$Node1, edges_to_export$Node2))
+      adj_diff <- matrix(0, nrow = length(diff_nodes), ncol = length(diff_nodes), dimnames = list(diff_nodes, diff_nodes))
+      for(k in 1:nrow(edges_to_export)) {
+        adj_diff[edges_to_export$Node1[k], edges_to_export$Node2[k]] <- 1
+        adj_diff[edges_to_export$Node2[k], edges_to_export$Node1[k]] <- 1
       }
-      num_cols <- names(all_nodes)[sapply(all_nodes, is.numeric)]
-      all_nodes[num_cols] <- lapply(all_nodes[num_cols], function(x) replace(x, is.na(x), 0))
-      readr::write_csv(all_nodes, file.path(cyto_dir, paste0(scenario$id, "_node_attributes.csv")))
+      
+      topo_diff <- calculate_node_topology(adj_diff)
+      if (!is.null(topo_diff)) {
+        all_nodes <- topo_diff %>% dplyr::select(Node, Degree, Betweenness, Closeness, Eigen_Centrality)
+        all_nodes <- annotate_marker_categories(all_nodes, config)
+        
+        if (!is.null(spls_drivers) && nrow(spls_drivers) > 0) {
+          drv_summ <- spls_drivers %>% dplyr::group_by(Marker) %>% dplyr::slice_max(order_by = Importance, n = 1, with_ties = FALSE) %>% dplyr::ungroup()
+          all_nodes <- dplyr::left_join(all_nodes, drv_summ[, c("Marker", "Importance", "Direction")], by = c("Node" = "Marker"))
+        }
+        num_cols <- names(all_nodes)[sapply(all_nodes, is.numeric)]
+        all_nodes[num_cols] <- lapply(all_nodes[num_cols], function(x) replace(x, is.na(x), 0))
+        readr::write_csv(all_nodes, file.path(target_dir, paste0(scenario$id, file_suffix, "_node_attributes.csv")))
+      }
     }
   }
+  
+  # Define sub-directory for remaining edges
+  cyto_rem_dir <- file.path(cyto_dir, "remaining_differential")
+  
+  # Execute helper for both networks targeting correct paths
+  export_cyto_diff(diff_edges_res$main, "_diff_network", cyto_dir)
+  export_cyto_diff(diff_edges_res$remaining, "_diff_network_remaining", cyto_rem_dir)
   
   # 5. Prepare Return Object (Passed to Meta-Analysis)
   sig_edges <- net_res$edges_table %>% dplyr::filter(Edge_Category != "Weak" & Significant == TRUE) %>% dplyr::arrange(P_Value)

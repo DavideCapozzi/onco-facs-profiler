@@ -215,7 +215,7 @@ cytoscape_export:
     max_export_edges: 50 
   
   differential:
-    exclude_conserved: true  
+    exclude_conserved: false
     min_stability_freq_any: 0.95
     min_diff_score: 0.10
     max_export_edges: 50 

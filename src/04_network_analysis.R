@@ -100,13 +100,13 @@ for (label in names(macro_groups)) {
     
     # Apply dynamic config filters using the Rank-Based Backbone strategy
     b_conf <- config$cytoscape_export$baseline
+    base_edges_res <- filter_baseline_backbone(base_edges_all, b_conf)
     
-    base_edges <- filter_baseline_backbone(base_edges_all, b_conf)
-    
-    if (nrow(base_edges) > 0) {
+    # Process Main Network
+    base_edges <- base_edges_res$main
+    if (!is.null(base_edges) && nrow(base_edges) > 0) {
       readr::write_csv(base_edges, file.path(cyto_base_dir, paste0(label, "_baseline_network.csv")))
       
-      # Rebuild adjacency strictly for exported nodes to generate clean node attributes
       adj_export <- matrix(0, nrow = length(nodes), ncol = length(nodes), dimnames = list(nodes, nodes))
       for(k in 1:nrow(base_edges)) {
         adj_export[base_edges$Source[k], base_edges$Target[k]] <- 1
@@ -117,6 +117,28 @@ for (label in names(macro_groups)) {
       if (!is.null(topo_base)) {
         topo_base <- annotate_marker_categories(topo_base, config)
         readr::write_csv(topo_base, file.path(cyto_base_dir, paste0(label, "_node_attributes.csv")))
+      }
+    }
+    
+    # Process Remaining Network
+    base_edges_rem <- base_edges_res$remaining
+    if (!is.null(base_edges_rem) && nrow(base_edges_rem) > 0) {
+      # Dynamically create the remaining directory only if edges exist
+      cyto_base_rem_dir <- file.path(cyto_base_dir, "remaining_baselines")
+      if (!dir.exists(cyto_base_rem_dir)) dir.create(cyto_base_rem_dir, recursive = TRUE)
+      
+      readr::write_csv(base_edges_rem, file.path(cyto_base_rem_dir, paste0(label, "_baseline_network_remaining.csv")))
+      
+      adj_export_rem <- matrix(0, nrow = length(nodes), ncol = length(nodes), dimnames = list(nodes, nodes))
+      for(k in 1:nrow(base_edges_rem)) {
+        adj_export_rem[base_edges_rem$Source[k], base_edges_rem$Target[k]] <- 1
+        adj_export_rem[base_edges_rem$Target[k], base_edges_rem$Source[k]] <- 1
+      }
+      
+      topo_base_rem <- calculate_node_topology(adj_export_rem)
+      if (!is.null(topo_base_rem)) {
+        topo_base_rem <- annotate_marker_categories(topo_base_rem, config)
+        readr::write_csv(topo_base_rem, file.path(cyto_base_rem_dir, paste0(label, "_baseline_network_remaining_node_attributes.csv")))
       }
     }
   }
