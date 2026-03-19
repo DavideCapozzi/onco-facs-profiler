@@ -170,7 +170,19 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
   
   if (!mode %in% c("complete", "fast")) stop("Mode must be 'complete' or 'fast'.")
   
-  eps_val <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
+  # --- Dynamic Epsilon Calculation ---
+  raw_eps_conf <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
+  
+  if (is.character(raw_eps_conf) && tolower(raw_eps_conf) == "auto") {
+    # Data-driven pseudo-count: 1st percentile of all strictly positive values, halved.
+    # Highly defensible method avoiding arbitrary bounds.
+    pos_vals <- mat_raw[mat_raw > 0 & !is.na(mat_raw)]
+    eps_val <- if (length(pos_vals) > 0) as.numeric(quantile(pos_vals, 0.01) / 2) else 1e-6
+    message(sprintf("   [Transform] Epsilon set to 'auto'. Calculated data-driven boundary: %s", format(eps_val, scientific = TRUE)))
+  } else {
+    eps_val <- as.numeric(raw_eps_conf)
+  }
+  
   input_fmt <- if(!is.null(config$input_format)) config$input_format else "percentage"
   
   # Future-proof architecture: check if transformation method is defined, default to logit
