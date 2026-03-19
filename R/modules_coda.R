@@ -102,7 +102,7 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
   k_used <- 2 
   
   if (is.null(nPcs) || nPcs == "auto") {
-    tryCatch({
+    k_used <- tryCatch({
       set.seed(seed)
       max_k <- min(5, hard_limit_k)
       
@@ -111,19 +111,20 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
       })
       suggested_k <- k_est$bestNPcs
       
+      # Return suggested value
       if (length(suggested_k) > 1) {
-        k_used <- min(suggested_k)
-        warning(sprintf("   [Impute] kEstimate ambiguous. Using conservative K=%d.", k_used))
+        warning(sprintf("   [Impute] kEstimate ambiguous. Using conservative K=%d.", min(suggested_k)))
+        min(suggested_k)
       } else if (length(suggested_k) == 0 || is.na(suggested_k)) {
-        k_used <- 2
+        2
       } else if (suggested_k > hard_limit_k) {
-        k_used <- hard_limit_k
+        hard_limit_k
       } else {
-        k_used <- suggested_k
+        suggested_k
       }
-      
     }, error = function(e) {
-      k_used <<- 2 
+      warning("   [Impute] kEstimate failed. Falling back to K=2.")
+      2 
     })
   } else {
     k_used <- as.numeric(nPcs)
