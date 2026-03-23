@@ -245,11 +245,6 @@ if (length(rows_with_na) > 0) {
 # Inject into report object
 qc_result$report$imputed_details <- impute_info_df
 
-# Save QC Report
-out_dir <- file.path(config$output_root, "01_data_processing")
-if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"), config = config)
-
 # 4. Final Hybrid Transformation (Complete Mode)
 # ------------------------------------------------------------------------------
 # Now running on strictly filtered data.
@@ -281,6 +276,49 @@ transform_results <- perform_data_transformation(mat_raw, config, mode = "comple
 mat_hybrid_raw <- transform_results$hybrid_data_raw
 mat_hybrid_z   <- transform_results$hybrid_data_z
 final_markers  <- transform_results$hybrid_markers
+clamped_mask   <- transform_results$clamped_mask
+
+# --- Clamping Details Extraction ---
+clamped_info_df <- data.frame(
+  Patient_ID = character(), 
+  Original_Source = character(), 
+  Clamped_Markers = character(),
+  stringsAsFactors = FALSE
+)
+
+# Identify samples with any clamped markers
+if (!is.null(clamped_mask)) {
+  rows_with_clamps <- which(rowSums(clamped_mask, na.rm = TRUE) > 0)
+  
+  if (length(rows_with_clamps) > 0) {
+    pids_clamp <- rownames(mat_raw)[rows_with_clamps]
+    
+    # Determine Group/Source column safely
+    grp_col <- if(config$metadata$subgroup_col %in% colnames(metadata_raw)) config$metadata$subgroup_col else "Group"
+    meta_indices <- match(pids_clamp, metadata_raw$Patient_ID)
+    sources <- as.character(metadata_raw[[grp_col]][meta_indices])
+    
+    # Construct list of markers per patient
+    markers_list <- apply(clamped_mask[rows_with_clamps, , drop=FALSE], 1, function(row_vals) {
+      paste(names(row_vals)[row_vals & !is.na(row_vals)], collapse = ", ")
+    })
+    
+    clamped_info_df <- data.frame(
+      Patient_ID = pids_clamp,
+      Original_Source = sources,
+      Clamped_Markers = markers_list,
+      stringsAsFactors = FALSE
+    )
+  }
+}
+
+# Inject clamped details into report object
+qc_result$report$clamped_details <- clamped_info_df
+
+# Save QC Report (Moved here to include post-transformation data)
+out_dir <- file.path(config$output_root, "01_data_processing")
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+save_qc_report(qc_result$report, file.path(out_dir, "QC_Filtering_Report.xlsx"), config = config)
 
 # 5. Final Safety Polish
 # ------------------------------------------------------------------------------

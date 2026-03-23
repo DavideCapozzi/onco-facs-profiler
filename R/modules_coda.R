@@ -56,12 +56,19 @@ coda_transform_logit <- function(mat, epsilon = 1e-6, input_type = "percentage")
     message(sprintf("   [Transform] Clamped %d boundary values.", n_low + n_high))
   }
   
+  # Explicitly track clamped values
+  is_clamped <- !is.na(p) & (p < epsilon | p > (1 - epsilon))
+  
   p[p < epsilon] <- epsilon
   p[p > (1 - epsilon)] <- 1 - epsilon
   
   # 3. Transform
   logit_mat <- log(p / (1 - p))
-  return(logit_mat)
+  
+  return(list(
+    data = logit_mat,
+    clamped_mask = is_clamped
+  ))
 }
 
 #' @title Bayesian PCA Imputation (Robust & Fail-Safe)
@@ -203,6 +210,11 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
   if (ncol(mat_raw) > 0) {
     mat_lod <- mat_raw
     
+    # Initialize clamping mask for both LOD and Epsilon tracking
+    global_clamped_mask <- matrix(FALSE, nrow = nrow(mat_lod), ncol = ncol(mat_lod))
+    rownames(global_clamped_mask) <- rownames(mat_lod)
+    colnames(global_clamped_mask) <- colnames(mat_lod)
+    
     if (trans_method == "logit") {
       # Handle Zeros / LOD specifically for logit
       if (mode == "complete") {
@@ -213,18 +225,30 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
         })
         for (j in 1:ncol(mat_lod)) {
           zeros <- which(mat_lod[, j] == 0 & !is.na(mat_lod[, j]))
-          if (length(zeros) > 0) mat_lod[zeros, j] <- mins[j]
+          if (length(zeros) > 0) {
+            mat_lod[zeros, j] <- mins[j]
+            global_clamped_mask[zeros, j] <- TRUE
+          }
         }
       } else {
+        zeros <- which(mat_lod <= 0 & !is.na(mat_lod))
+        if (length(zeros) > 0) global_clamped_mask[zeros] <- TRUE
         mat_lod[mat_lod <= 0] <- eps_val 
       }
       
       # Apply Logit
-      mat_transformed <- coda_transform_logit(
+      logit_res <- coda_transform_logit(
         mat = mat_lod, 
         epsilon = eps_val, 
         input_type = input_fmt 
       )
+      mat_transformed <- logit_res$data
+      
+      # Combine epsilon clamps with LOD clamps
+      if (!is.null(logit_res$clamped_mask)) {
+        global_clamped_mask <- global_clamped_mask | logit_res$clamped_mask
+      }
+      
     } else if (trans_method == "none") {
       # Pass-through for unbounded data (e.g. pg/mL Cytokines)
       mat_transformed <- mat_lod
@@ -273,6 +297,7 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
   return(list(
     hybrid_data_raw = mat_final_raw,
     hybrid_data_z = mat_final_z,
-    hybrid_markers = colnames(mat_final_z)
+    hybrid_markers = colnames(mat_final_z),
+    clamped_mask = global_clamped_mask
   ))
 }
