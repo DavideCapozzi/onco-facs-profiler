@@ -168,8 +168,10 @@ impute_matrix_bpca <- function(mat, nPcs = "auto", seed = 123) {
 #' @title Perform Data Transformation Pipeline
 #' @description 
 #' Orchestrates the transformation:
-#' - Handles LOD (Limit of Detection) Zeros
-#' - Applies Logit transformation (if enabled via config)
+#' - Unified scale management (Raw vs Proportion)
+#' - Robust Auto-Epsilon calculation (Median of bottom 1% of strictly positive values)
+#' - Handles LOD (Limit of Detection) Zeros dynamically per column
+#' - Applies Logit transformation
 #' - Performs BPCA Imputation
 #' - Z-Score Standardization
 #' @export
@@ -177,121 +179,152 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
   
   if (!mode %in% c("complete", "fast")) stop("Mode must be 'complete' or 'fast'.")
   
-  # --- Dynamic Epsilon Calculation ---
-  raw_eps_conf <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
-  
-  if (is.character(raw_eps_conf) && tolower(raw_eps_conf) == "auto") {
-    # Data-driven pseudo-count: 1st percentile of all strictly positive values, halved.
-    # Highly defensible method avoiding arbitrary bounds.
-    pos_vals <- mat_raw[mat_raw > 0 & !is.na(mat_raw)]
-    eps_val <- if (length(pos_vals) > 0) as.numeric(quantile(pos_vals, 0.01) / 2) else 1e-6
-    message(sprintf("   [Transform] Epsilon set to 'auto'. Calculated data-driven boundary: %s", format(eps_val, scientific = TRUE)))
-  } else {
-    eps_val <- as.numeric(raw_eps_conf)
-  }
-  
+  rn_safe <- rownames(mat_raw)
   input_fmt <- if(!is.null(config$input_format)) config$input_format else "percentage"
-  
-  # Future-proof architecture: check if transformation method is defined, default to logit
   trans_method <- if(!is.null(config$transformation$method)) config$transformation$method else "logit"
   
-  message(sprintf("\n[Transform] Starting Strategy (%s mode). Method: %s. Input Format: %s...", mode, trans_method, input_fmt))
-  
-  rn_safe <- rownames(mat_raw)
-  mat_trans <- NULL
-  
-  # Remove 100% NA columns
+  # Remove 100% NA columns before any operation
   na_counts <- colSums(is.na(mat_raw))
   empty_cols <- which(na_counts == nrow(mat_raw))
   if (length(empty_cols) > 0) {
     mat_raw <- mat_raw[, -empty_cols, drop = FALSE]
   }
   
-  if (ncol(mat_raw) > 0) {
-    mat_lod <- mat_raw
-    
-    # Initialize clamping mask for both LOD and Epsilon tracking
-    global_clamped_mask <- matrix(FALSE, nrow = nrow(mat_lod), ncol = ncol(mat_lod))
-    rownames(global_clamped_mask) <- rownames(mat_lod)
-    colnames(global_clamped_mask) <- colnames(mat_lod)
-    
-    if (trans_method == "logit") {
-      # Handle Zeros / LOD specifically for logit
-      if (mode == "complete") {
-        mins <- apply(mat_lod, 2, function(x) {
-          pos <- x[x > 0 & !is.na(x)]
-          if(length(pos) == 0) return(eps_val)
-          return(min(pos) / 2)
-        })
-        for (j in 1:ncol(mat_lod)) {
-          zeros <- which(mat_lod[, j] == 0 & !is.na(mat_lod[, j]))
-          if (length(zeros) > 0) {
-            mat_lod[zeros, j] <- mins[j]
-            global_clamped_mask[zeros, j] <- TRUE
-          }
-        }
-      } else {
-        zeros <- which(mat_lod <= 0 & !is.na(mat_lod))
-        if (length(zeros) > 0) global_clamped_mask[zeros] <- TRUE
-        mat_lod[mat_lod <= 0] <- eps_val 
-      }
-      
-      # Apply Logit
-      logit_res <- coda_transform_logit(
-        mat = mat_lod, 
-        epsilon = eps_val, 
-        input_type = input_fmt 
-      )
-      mat_transformed <- logit_res$data
-      
-      # Combine epsilon clamps with LOD clamps
-      if (!is.null(logit_res$clamped_mask)) {
-        global_clamped_mask <- global_clamped_mask | logit_res$clamped_mask
-      }
-      
-    } else if (trans_method == "none") {
-      # Pass-through for unbounded data (e.g. pg/mL Cytokines)
-      mat_transformed <- mat_lod
-    } else {
-      stop(sprintf("[Transform] Unknown transformation method: %s", trans_method))
-    }
-    
-    # Imputation
-    if (mode == "complete") {
-      seed_val <- if(!is.null(config$stats$seed)) config$stats$seed else 123
-      mat_trans <- impute_matrix_bpca(mat_transformed, nPcs = "auto", seed = seed_val)
-    } else {
-      mat_trans <- mat_transformed
-    }
-    rownames(mat_trans) <- rn_safe
+  if (ncol(mat_raw) == 0) stop("[FATAL] All columns are empty.")
+  
+  # --------------------------------------------------------------------------
+  # 1. ROBUST AUTO-EPSILON CALCULATION
+  # --------------------------------------------------------------------------
+  raw_eps_conf <- if(!is.null(config$imputation$epsilon)) config$imputation$epsilon else 1e-6
+  
+  # Temporary conversion to proportion strictly for robust boundary estimation
+  mat_prop_temp <- mat_raw
+  if (input_fmt == "percentage") {
+    mat_prop_temp <- mat_raw / 100
   }
   
-  if (is.null(mat_trans)) stop("[FATAL] No data remaining after filtering.")
+  if (is.character(raw_eps_conf) && tolower(raw_eps_conf) == "auto") {
+    pos_vals <- mat_prop_temp[mat_prop_temp > 0 & !is.na(mat_prop_temp)]
+    
+    if (length(pos_vals) > 0) {
+      threshold_1pct <- quantile(pos_vals, 0.01, na.rm = TRUE)
+      bottom_1pct_vals <- pos_vals[pos_vals <= threshold_1pct]
+      
+      # Divide by 2 (standard for LOD imputation) and enforce a strict mathematical floor
+      calculated_eps <- as.numeric(median(bottom_1pct_vals) / 2)
+      eps_prop <- max(calculated_eps, 1e-8) 
+    } else {
+      eps_prop <- 1e-6
+    }
+    
+    eps_raw_display <- eps_prop * (if(input_fmt == "percentage") 100 else 1)
+    message(sprintf("   [Transform] Epsilon 'auto' selected. Robust LOD boundary set to %s (Proportion space: %s)", 
+                    format(eps_raw_display, scientific = TRUE), format(eps_prop, scientific = TRUE)))
+  } else {
+    # If user provided a numeric value, it is treated as the target proportion epsilon
+    eps_prop <- as.numeric(raw_eps_conf)
+  }
   
-  mat_final_raw <- mat_trans[, sort(colnames(mat_trans)), drop = FALSE]
+  # Scale epsilon back to raw space for LOD matrix adjustments (preventing scale-mismatch in "fast" mode)
+  eps_raw <- eps_prop * (if(input_fmt == "percentage") 100 else 1)
+  
+  message(sprintf("\n[Transform] Starting Strategy (%s mode). Method: %s. Input Format: %s...", mode, trans_method, input_fmt))
+  
+  # Initialize clamping mask for tracking
+  global_clamped_mask <- matrix(FALSE, nrow = nrow(mat_raw), ncol = ncol(mat_raw))
+  rownames(global_clamped_mask) <- rownames(mat_raw)
+  colnames(global_clamped_mask) <- colnames(mat_raw)
+  
+  mat_trans <- NULL
+  
+  # --------------------------------------------------------------------------
+  # 2. LOD HANDLING & TRANSFORMATION
+  # --------------------------------------------------------------------------
+  if (trans_method == "logit") {
+    
+    mat_lod <- mat_raw
+    
+    # Handle Zeros / LOD specifically for logit, in RAW space
+    if (mode == "complete") {
+      mins_raw <- apply(mat_lod, 2, function(x) {
+        pos <- x[x > 0 & !is.na(x)]
+        if(length(pos) == 0) return(eps_raw)
+        return(min(pos) / 2)
+      })
+      
+      for (j in 1:ncol(mat_lod)) {
+        zeros <- which(mat_lod[, j] == 0 & !is.na(mat_lod[, j]))
+        if (length(zeros) > 0) {
+          mat_lod[zeros, j] <- mins_raw[j]
+          global_clamped_mask[zeros, j] <- TRUE
+        }
+      }
+    } else {
+      # Fast mode uses the unified eps_raw to avoid scale-crushing bugs
+      zeros <- which(mat_lod <= 0 & !is.na(mat_lod))
+      if (length(zeros) > 0) global_clamped_mask[zeros] <- TRUE
+      mat_lod[mat_lod <= 0] <- eps_raw 
+    }
+    
+    # Apply Logit (API naturally expects mat_lod in raw space and epsilon in proportion space)
+    logit_res <- coda_transform_logit(
+      mat = mat_lod, 
+      epsilon = eps_prop, 
+      input_type = input_fmt 
+    )
+    mat_transformed <- logit_res$data
+    
+    if (!is.null(logit_res$clamped_mask)) {
+      global_clamped_mask <- global_clamped_mask | logit_res$clamped_mask
+    }
+    
+  } else if (trans_method == "none") {
+    mat_transformed <- mat_raw
+  } else {
+    stop(sprintf("[Transform] Unknown transformation method: %s", trans_method))
+  }
+  
+  # --------------------------------------------------------------------------
+  # 3. IMPUTATION & SCALING
+  # --------------------------------------------------------------------------
+  if (mode == "complete") {
+    seed_val <- if(!is.null(config$stats$seed)) config$stats$seed else 123
+    mat_trans <- impute_matrix_bpca(mat_transformed, nPcs = "auto", seed = seed_val)
+  } else {
+    mat_trans <- mat_transformed
+  }
+  rownames(mat_trans) <- rn_safe
+  
+  # The output raw matrix must reflect the LOD adjustments but remain in raw scale
+  mat_final_raw <- mat_lod[, sort(colnames(mat_lod)), drop = FALSE] 
+  mat_trans <- mat_trans[, sort(colnames(mat_trans)), drop = FALSE]
+  
   mat_final_z <- NULL
   
   if (mode == "complete") {
-    # 1. Prevent NaN generation from scale() by filtering zero-variance columns post-imputation
-    col_vars_post <- apply(mat_final_raw, 2, var, na.rm = TRUE)
+    # Protect scaling from zero-variance columns post-imputation
+    col_vars_post <- apply(mat_trans, 2, var, na.rm = TRUE)
     valid_cols_post <- !is.na(col_vars_post) & (col_vars_post > 1e-12)
     
     if (sum(!valid_cols_post) > 0) {
       n_dropped <- sum(!valid_cols_post)
       message(sprintf("   [Transform] Dropping %d columns with zero variance post-imputation to protect scaling.", n_dropped))
+      
       mat_final_raw <- mat_final_raw[, valid_cols_post, drop = FALSE]
+      mat_trans <- mat_trans[, valid_cols_post, drop = FALSE]
+      global_clamped_mask <- global_clamped_mask[, valid_cols_post, drop = FALSE]
     }
     
-    if (ncol(mat_final_raw) == 0) stop("[FATAL] All columns dropped due to zero variance post-imputation.")
+    if (ncol(mat_trans) == 0) stop("[FATAL] All columns dropped due to zero variance post-imputation.")
     
-    # 2. Safe scaling
-    mat_final_z <- scale(mat_final_raw)
+    # Safe scaling
+    mat_final_z <- scale(mat_trans)
     attr(mat_final_z, "scaled:center") <- NULL
     attr(mat_final_z, "scaled:scale") <- NULL
     mat_final_z <- as.matrix(mat_final_z)
     rownames(mat_final_z) <- rn_safe
   } else {
-    mat_final_z <- mat_final_raw
+    mat_final_z <- mat_trans
   }
   
   return(list(
