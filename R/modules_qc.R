@@ -26,8 +26,11 @@ detect_pca_outliers <- function(mat, groups, conf_level = 0.99) {
     
     # Skip if too few samples (need at least 5 for PCA/Covariance stability)
     if (length(idx) < 5) {
+      if (length(idx) > 0) {
+        message(sprintf("   [QC] Bypassing PCA outlier detection for group '%s' (n=%d < 5).", g, length(idx)))
+      }
       next
-    }
+    } # <--- FIXED: Added missing closing brace here!
     
     sub_mat <- mat[idx, , drop = FALSE]
     

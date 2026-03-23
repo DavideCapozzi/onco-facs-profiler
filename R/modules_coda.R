@@ -324,7 +324,9 @@ perform_data_transformation <- function(mat_raw, config, mode = "complete") {
     mat_final_z <- as.matrix(mat_final_z)
     rownames(mat_final_z) <- rn_safe
   } else {
+    # Fast mode strictly serves as a geometric proxy; scaling is bypassed intentionally.
     mat_final_z <- mat_trans
+    message("   [Transform] Fast mode active: Outputting proxy matrix without Z-scoring.")
   }
   
   return(list(

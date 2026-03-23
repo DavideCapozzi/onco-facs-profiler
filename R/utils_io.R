@@ -401,10 +401,17 @@ save_qc_report <- function(qc_list, out_path, config = NULL) {
 }
 
 #' @title Safe Excel Sheet Name
-#' @description Truncates a string to comply with Excel's 31-character limit for sheet names.
-#' @param name String to truncate.
+#' @description Sanitizes invalid characters and truncates a string to comply 
+#'              with Excel's strict sheet naming rules (max 31 chars, no reserved symbols).
+#' @param name String to sanitize and truncate.
 #' @param max_len Integer. Maximum character length (default 31).
-#' @return Truncated string safe for openxlsx.
+#' @return Truncated and sanitized string safe for openxlsx.
 safe_sheet_name <- function(name, max_len = 31) {
-  return(substr(name, 1, max_len))
+  # Replace invalid Excel sheet characters with underscores
+  clean_name <- gsub("[\\[\\]\\*\\/\\\\\\?\\:]", "_", name)
+  
+  # Remove leading/trailing spaces that Excel dislikes
+  clean_name <- trimws(clean_name)
+  
+  return(substr(clean_name, 1, max_len))
 }
