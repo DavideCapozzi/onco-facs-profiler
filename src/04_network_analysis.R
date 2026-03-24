@@ -181,6 +181,30 @@ if (length(diff_edges_list) >= 2) {
   meta_dir <- file.path(results_dir, "Meta_Analysis")
   if (!dir.exists(meta_dir)) dir.create(meta_dir, recursive = TRUE)
   
+  # --- Categorical Edge Signature Heatmap ---
+  # Define the specific scenarios to track chronologically/phenotypically
+  target_heat_scenarios <- c("00_HDvsTumor", "01_HDvsEP", "02_HDvsLS", "03_EPvsLS")
+  
+  message("   [Meta-Analysis] Generating Categorical Edge Signature Heatmap...")
+  pdf(file.path(meta_dir, "Edge_Signature_Trajectories.pdf"), width = 10, height = 12)
+  tryCatch({
+    hm_obj <- viz_plot_categorical_edge_heatmap(
+      scenarios_list = payload04$scenarios,
+      target_scenarios = target_heat_scenarios,
+      config = config,
+      title = "Phenotypic Network Rewiring"
+    )
+    if (!is.null(hm_obj)) ComplexHeatmap::draw(hm_obj, merge_legend = TRUE)
+  }, error = function(e) { 
+    p_err <- ggplot2::ggplot() + 
+      ggplot2::annotate("text", x = 0, y = 0, label = paste("Heatmap Plot Error:", e$message), color = "darkred", size = 5, fontface = "bold") + 
+      ggplot2::theme_void()
+    print(p_err)
+  })
+  dev.off()
+  
+  # --- Legacy: Standard UpSet/Venn Diagram ---
+  message("   [Meta-Analysis] Generating UpSet/Venn Overlap...")
   pdf(file.path(meta_dir, "Differential_Networks_Overlap.pdf"), width = 8, height = 8)
   tryCatch({
     viz_plot_differential_overlap(edge_list = diff_edges_list, fill_colors = scenario_colors, title = "Differential Edges Overlap")

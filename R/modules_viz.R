@@ -1200,3 +1200,115 @@ viz_plot_edge_density_overlay <- function(pcor_mat, cor_mat, adj_mat = NULL, thr
   
   return(p)
 }
+
+#' @title Plot Categorical Edge Signature Heatmap
+#' @description 
+#' Generates a discrete heatmap of edge categories across specific scenarios.
+#' Tracks phenotypic trajectories of immunological interactions (e.g., HD -> EP -> LS).
+#' 
+#' @param scenarios_list List of scenario outputs containing 'edges_table' and 'sig_edges'.
+#' @param target_scenarios Character vector of scenario IDs to track.
+#' @param config Global configuration object for dynamic color extraction.
+#' @param title Plot title.
+#' @return A ComplexHeatmap object (drawn).
+viz_plot_categorical_edge_heatmap <- function(scenarios_list, target_scenarios, config, title = "Phenotypic Edge Trajectories") {
+  
+  requireNamespace("ComplexHeatmap", quietly = TRUE)
+  requireNamespace("grid", quietly = TRUE)
+  requireNamespace("dplyr", quietly = TRUE)
+  requireNamespace("tidyr", quietly = TRUE)
+  
+  # 1. Validate inputs
+  valid_scenarios <- intersect(target_scenarios, names(scenarios_list))
+  if (length(valid_scenarios) < 2) {
+    warning("[Viz] At least 2 valid scenarios required for Signature Heatmap.")
+    return(NULL)
+  }
+  
+  # 2. Extract the union of all Significant Edges across target scenarios
+  sig_edges_union <- c()
+  for (scen in valid_scenarios) {
+    if (!is.null(scenarios_list[[scen]]$sig_edges) && nrow(scenarios_list[[scen]]$sig_edges) > 0) {
+      # Fast vectorized edge ID generation ensuring alphabetic node order
+      ids <- paste(pmin(scenarios_list[[scen]]$sig_edges$Node1, scenarios_list[[scen]]$sig_edges$Node2),
+                   pmax(scenarios_list[[scen]]$sig_edges$Node1, scenarios_list[[scen]]$sig_edges$Node2), 
+                   sep = "~")
+      sig_edges_union <- unique(c(sig_edges_union, ids))
+    }
+  }
+  
+  if (length(sig_edges_union) == 0) {
+    message("   [Viz] No significant edges found to build signature heatmap.")
+    return(NULL)
+  }
+  
+  # 3. Build Long Dataframe containing all statuses
+  long_list <- list()
+  for (scen in valid_scenarios) {
+    if (!is.null(scenarios_list[[scen]]$edges_table)) {
+      df <- scenarios_list[[scen]]$edges_table
+      df$Edge_ID <- paste(pmin(df$Node1, df$Node2), pmax(df$Node1, df$Node2), sep = "~")
+      
+      # Retain only edges that are significant in AT LEAST ONE scenario
+      df_sub <- df[df$Edge_ID %in% sig_edges_union, c("Edge_ID", "Edge_Category")]
+      df_sub$Scenario <- scen
+      long_list[[scen]] <- df_sub
+    }
+  }
+  
+  long_df <- do.call(rbind, long_list)
+  
+  # 4. Pivot to Wide format and sort to create visual blocks (Visual Clustering)
+  wide_df <- tidyr::pivot_wider(long_df, names_from = "Scenario", values_from = "Edge_Category", values_fill = "Weak")
+  
+  # Sort rows by scenario columns alphabetically to cluster identical trajectories naturally
+  wide_df <- wide_df %>% dplyr::arrange(dplyr::across(dplyr::all_of(valid_scenarios)))
+  
+  wide_mat <- as.matrix(wide_df[, valid_scenarios])
+  rownames(wide_mat) <- wide_df$Edge_ID
+  
+  # 5. Dynamic Color Mapping Logic
+  all_cats <- unique(as.character(wide_mat))
+  cat_colors <- c(
+    "Conserved"   = "#A9A9A9", # DarkGray
+    "Weak"        = "#F5F5F5", # WhiteSmoke
+    "Inverted"    = "#000000", # Black
+    "Specific_LS" = "#9BE5FF"  # Colore personalizzato forzato per i Long Survivors
+  )
+  
+  base_colors <- config$colors$groups
+  
+  for (cat in all_cats) {
+    if (!cat %in% names(cat_colors)) {
+      if (grepl("^Specific_", cat)) {
+        # Extract true biological group name (e.g., "Specific_HD" -> "HD")
+        grp <- gsub("^Specific_", "", cat)
+        if (!is.null(base_colors[[grp]])) {
+          cat_colors[cat] <- base_colors[[grp]]
+        } else {
+          cat_colors[cat] <- "#8B008B" # Fallback magenta for unmapped targets
+        }
+      } else {
+        cat_colors[cat] <- "#D3D3D3" # Fallback light gray
+      }
+    }
+  }
+  
+  # 6. Generate ComplexHeatmap
+  hm <- ComplexHeatmap::Heatmap(
+    wide_mat,
+    name = "Interaction Role",
+    col = cat_colors,
+    rect_gp = grid::gpar(col = "white", lwd = 0.5), # Add borders to cells for crispness
+    row_title = sprintf("Differential Edges (n=%d)", nrow(wide_mat)),
+    column_title = title,
+    row_names_gp = grid::gpar(fontsize = 5),
+    column_names_gp = grid::gpar(fontsize = 10, fontface = "bold"),
+    cluster_columns = FALSE,
+    cluster_rows = FALSE, # Required: Discrete matrices cannot be euclidean clustered. Pre-sorting handles this.
+    show_row_dend = FALSE,
+    column_names_rot = 45
+  )
+  
+  return(hm)
+}
