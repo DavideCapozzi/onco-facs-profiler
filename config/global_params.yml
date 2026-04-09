@@ -49,8 +49,8 @@ analysis_scenarios:
     control_groups: ["HNSCC_EP", "NSCLC_EP"]
 
   - id: "04_HDvsINT"
-    description: "A"
-    case_label: "Defining typical patient inter-tumor signature"
+    description: "Defining typical patient inter-tumor signature"
+    case_label: "INT"
     case_groups: ["HNSCC_INT", "NSCLC_INT"]
     control_label: "HD"
     control_groups: ["Healthy_Donors"]
