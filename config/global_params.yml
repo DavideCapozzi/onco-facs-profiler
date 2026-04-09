@@ -5,7 +5,7 @@
 # --- Setup ---
 output_root: "results"
 project_name: "longsurvivors"
-input_file: "/mnt/c/Users/Davide/Desktop/dottorato/projects/long survivors/DB_standardizzatov4_newPatients.xlsx"
+input_file: "data/DB_standardizzatov5_intermedi.xlsx"
 
 transformation:
   method: "logit" # Options: "logit" (for FACS percentages/proportions), "none" (for continuous unbounded data)
@@ -50,17 +50,24 @@ analysis_scenarios:
 
   - id: "04_HDvsINT"
     description: "A"
-    case_label: "PR"
+    case_label: "Defining typical patient inter-tumor signature"
     case_groups: ["HNSCC_INT", "NSCLC_INT"]
     control_label: "HD"
     control_groups: ["Healthy_Donors"]
 
-  - id: "05_EPvsPR"
-    description: "B"
-    case_label: "PR"
+  - id: "05_EPvsINT"
+    description: "Identifying other EP features"
+    case_label: "INT"
     case_groups: ["HNSCC_INT", "NSCLC_INT"]
     control_label: "EP"
     control_groups: ["HNSCC_EP", "NSCLC_EP"]
+
+  - id: "06_INTvsLS"
+    description: "Identifying other LS features"
+    case_label: "LS"
+    case_groups: ["HNSCC_LS", "NSCLC_LS"]
+    control_label: "INT"
+    control_groups: ["HNSCC_INT", "NSCLC_INT"]
 
 # --- STRATIFICATION LOGIC ---
 # "selection" mode simply promotes the target column to be the main grouping variable.
